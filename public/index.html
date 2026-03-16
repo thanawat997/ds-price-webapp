@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>บันทึกราคารถเข้าสาขา</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>บันทึกราคารถเข้าสาขา</h1>
+
+      <section class="card">
+        <div class="row">
+          <label class="label" for="serviceDate">วันที่เข้ารับบริการ</label>
+          <div class="dropdown" id="serviceDateDropdown">
+            <button id="serviceDate" class="input dropdown-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+              เลือกวันที่
+            </button>
+            <div id="serviceDateMenu" class="dropdown-menu" role="listbox"></div>
+          </div>
+        </div>
+
+        <div class="row">
+          <label class="label" for="plate">ทะเบียนรถ</label>
+          <div class="dropdown" id="plateDropdown">
+            <button
+              id="plate"
+              class="input dropdown-trigger"
+              type="button"
+              aria-haspopup="listbox"
+              aria-expanded="false"
+              disabled
+            >
+              เลือกทะเบียน
+            </button>
+            <div id="plateMenu" class="dropdown-menu" role="listbox">
+              <div class="dropdown-search">
+                <input id="plateSearch" class="dropdown-search-input" type="text" placeholder="ค้นหาทะเบียน..." />
+              </div>
+              <div id="plateOptions" class="dropdown-options"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <label class="label" for="branch">สาขา</label>
+          <input id="branch" class="input readonly" type="text" readonly />
+        </div>
+
+        <div class="row">
+          <label class="label" for="model">รุ่นรถ</label>
+          <input id="model" class="input readonly" type="text" readonly />
+        </div>
+
+        <div class="row">
+          <label class="label" for="price">ราคา</label>
+          <input id="price" class="input" inputmode="numeric" autocomplete="off" />
+        </div>
+
+        <div class="row">
+          <label class="label" for="tentName">ชื่อเต็นท์</label>
+          <div class="dropdown" id="tentNameDropdown">
+            <button id="tentName" class="input dropdown-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+              เลือกชื่อเต็นท์
+            </button>
+            <div id="tentNameMenu" class="dropdown-menu" role="listbox">
+              <div class="dropdown-search">
+                <input id="tentNameSearch" class="dropdown-search-input" type="text" placeholder="ค้นหาชื่อเต็นท์..." />
+              </div>
+              <div id="tentNameOptions" class="dropdown-options"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button id="submit" class="button" disabled>บันทึก</button>
+          <button id="reset" class="button secondary" type="button">ล้างค่า</button>
+        </div>
+
+        <div id="status" class="status" role="status"></div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
