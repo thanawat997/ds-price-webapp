@@ -4,7 +4,17 @@ require("dotenv").config();
 
 const express = require("express");
 
-const { getAvailableDates, getPlatesByDate, getCaseByDateAndPlate, appendPriceRow, getBranchDaySummary } = require("./src/sheets");
+const {
+  getAvailableDates,
+  getPlatesByDate,
+  getCaseByDateAndPlate,
+  appendPriceRow,
+  getBranchDaySummary,
+  listTents,
+  createTent,
+  updateTent,
+  deleteTent
+} = require("./src/sheets");
 const { pushLineGroupMessage } = require("./src/line");
 const { formatBangkokTimestampForSheet } = require("./src/format");
 const { buildBranchDayLineMessage } = require("./src/lineMessage");
@@ -50,6 +60,56 @@ app.get("/api/case", async (req, res) => {
     res.json({ case: caseData });
   } catch (error) {
     res.status(500).json({ error: String(error?.message || error) });
+  }
+});
+
+app.get("/api/tents", async (_req, res) => {
+  try {
+    const tents = await listTents();
+    res.json({ tents });
+  } catch (error) {
+    res.status(500).json({ error: String(error?.message || error) });
+  }
+});
+
+app.post("/api/tents", async (req, res) => {
+  try {
+    const name = String(req.body?.name || "").trim();
+    if (!name) return res.status(400).json({ error: "missing name" });
+    const tent = await createTent({ name });
+    res.json({ ok: true, tent });
+  } catch (error) {
+    const message = String(error?.message || error);
+    const status = message.includes("duplicate") ? 409 : 500;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.put("/api/tents/:code", async (req, res) => {
+  try {
+    const code = String(req.params?.code || "").trim();
+    const name = String(req.body?.name || "").trim();
+    if (!code) return res.status(400).json({ error: "missing code" });
+    if (!name) return res.status(400).json({ error: "missing name" });
+    const tent = await updateTent({ code, name });
+    res.json({ ok: true, tent });
+  } catch (error) {
+    const message = String(error?.message || error);
+    const status = message.includes("not found") ? 404 : message.includes("duplicate") ? 409 : 500;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.delete("/api/tents/:code", async (req, res) => {
+  try {
+    const code = String(req.params?.code || "").trim();
+    if (!code) return res.status(400).json({ error: "missing code" });
+    await deleteTent({ code });
+    res.json({ ok: true });
+  } catch (error) {
+    const message = String(error?.message || error);
+    const status = message.includes("not found") ? 404 : 500;
+    res.status(status).json({ error: message });
   }
 });
 

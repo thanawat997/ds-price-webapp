@@ -3,13 +3,286 @@ const fs = require("fs");
 const path = require("path");
 
 const { formatServiceDateDDMMYYYY } = require("./format");
-const { getCodeTentNameForSheet } = require("./tentCodes");
+const { getCodeTentNameForSheet, getTentCode } = require("./tentCodes");
 
 const SHEET1_ID = process.env.SHEET1_ID;
 const SHEET2_ID = process.env.SHEET2_ID;
 
 const SHEET1_NAME = process.env.SHEET1_NAME || "ราคารถเข้าสาขา";
 const SHEET2_NAME = process.env.SHEET2_NAME || "primary key";
+const TENTS_SHEET_NAME = process.env.TENTS_SHEET_NAME || "tents";
+
+const BASE_TENT_CODE_NUMBER = 67100033;
+
+function normalizeTentName(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\s*\/\s*/g, "/");
+}
+
+function parseTentCodeNumber(code) {
+  const text = String(code || "").trim();
+  const match = text.match(/^JCD(\d{8})$/);
+  if (!match) return null;
+  const number = Number(match[1]);
+  return Number.isFinite(number) ? number : null;
+}
+
+function parseSeedTentNamesFromPublicApp() {
+  const appPath = path.join(__dirname, "..", "public", "app.js");
+  const content = fs.readFileSync(appPath, "utf8");
+  const match = content.match(/const\s+(?:tents|fallbackTents)\s*=\s*\[([\s\S]*?)\];/);
+  if (!match) return [];
+  const body = match[1];
+  const names = [];
+  const regex = /"([^"]+)"/g;
+  let m;
+  while ((m = regex.exec(body))) {
+    const raw = String(m[1] || "").trim();
+    if (raw) names.push(raw);
+  }
+  return names;
+}
+
+async function getSpreadsheetMeta({ spreadsheetId }) {
+  const sheets = await getSheetsClient();
+  const response = await sheets.spreadsheets.get({ spreadsheetId });
+  return response.data;
+}
+
+async function ensureSheetExists({ spreadsheetId, title }) {
+  const meta = await getSpreadsheetMeta({ spreadsheetId });
+  const existing = (meta.sheets || []).find((s) => String(s?.properties?.title || "") === title);
+  if (existing?.properties?.sheetId != null) return existing.properties.sheetId;
+
+  const sheets = await getSheetsClient();
+  const response = await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [{ addSheet: { properties: { title } } }]
+    }
+  });
+  const sheetId = response.data?.replies?.[0]?.addSheet?.properties?.sheetId;
+  if (sheetId == null) throw new Error(`Failed to create sheet: ${title}`);
+  return sheetId;
+}
+
+async function ensureTentsSheetInitialized() {
+  getRequiredEnv("SHEET1_ID");
+  const sheetId = await ensureSheetExists({ spreadsheetId: SHEET1_ID, title: TENTS_SHEET_NAME });
+  const sheets = await getSheetsClient();
+  const range = `'${TENTS_SHEET_NAME}'!A:B`;
+  const current = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET1_ID, range });
+  const values = current.data?.values || [];
+  const hasDataRows = values.length >= 2 || (values.length === 1 && values[0].some((v) => String(v || "").trim()));
+  if (hasDataRows) return { sheetId };
+
+  const seedNames = parseSeedTentNamesFromPublicApp();
+  const deduped = new Map();
+  for (const name of seedNames) {
+    const normalized = normalizeTentName(name);
+    if (!normalized) continue;
+    if (!deduped.has(normalized)) deduped.set(normalized, name);
+  }
+
+  let maxNumber = BASE_TENT_CODE_NUMBER;
+  const seedEntries = [];
+  for (const name of deduped.values()) {
+    const code = String(getTentCode(name) || "").trim();
+    const n = parseTentCodeNumber(code);
+    if (n != null && n > maxNumber) maxNumber = n;
+    seedEntries.push({ code, name });
+  }
+
+  for (const entry of seedEntries) {
+    if (entry.code) continue;
+    maxNumber += 1;
+    entry.code = `JCD${String(maxNumber).padStart(8, "0")}`;
+  }
+
+  const seedRows = seedEntries.map((e) => [e.code, e.name]);
+  seedRows.sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+
+  const newValues = [["code", "name"], ...seedRows];
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SHEET1_ID,
+    range: `'${TENTS_SHEET_NAME}'!A1`,
+    valueInputOption: "RAW",
+    requestBody: { values: newValues }
+  });
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SHEET1_ID,
+    range: `'${TENTS_SHEET_NAME}'!C1:D1`,
+    valueInputOption: "RAW",
+    requestBody: { values: [["last_issued_code_number", String(maxNumber)]] }
+  });
+
+  return { sheetId };
+}
+
+async function readTentsRawRows() {
+  await ensureTentsSheetInitialized();
+  const sheets = await getSheetsClient();
+  const range = `'${TENTS_SHEET_NAME}'!A:B`;
+  const response = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET1_ID, range });
+  const values = response.data?.values || [];
+  const rows = [];
+  for (let index = 0; index < values.length; index += 1) {
+    const row = values[index] || [];
+    const code = String(row[0] || "").trim();
+    const name = String(row[1] || "").trim();
+    rows.push({ rowNumber: index + 1, code, name });
+  }
+  return rows;
+}
+
+async function listTents() {
+  const rows = await readTentsRawRows();
+  const result = [];
+  for (const row of rows) {
+    if (row.rowNumber === 1 && normalizeTentName(row.code) === "code") continue;
+    if (!row.name) continue;
+    result.push({ code: row.code, name: row.name });
+  }
+  result.sort((a, b) => normalizeTentName(a.name).localeCompare(normalizeTentName(b.name)));
+  return result;
+}
+
+async function findTentByName(name) {
+  const normalized = normalizeTentName(name);
+  if (!normalized) return null;
+  const rows = await readTentsRawRows();
+  for (const row of rows) {
+    if (row.rowNumber === 1 && normalizeTentName(row.code) === "code") continue;
+    if (!row.name) continue;
+    if (normalizeTentName(row.name) === normalized) {
+      return { code: row.code, name: row.name, rowNumber: row.rowNumber };
+    }
+  }
+  return null;
+}
+
+async function findTentByCode(code) {
+  const normalizedCode = String(code || "").trim();
+  if (!normalizedCode) return null;
+  const rows = await readTentsRawRows();
+  for (const row of rows) {
+    if (row.rowNumber === 1 && normalizeTentName(row.code) === "code") continue;
+    if (!row.code) continue;
+    if (row.code === normalizedCode) return row;
+  }
+  return null;
+}
+
+async function readLastIssuedTentCodeNumber() {
+  await ensureTentsSheetInitialized();
+  const sheets = await getSheetsClient();
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: SHEET1_ID,
+    range: `'${TENTS_SHEET_NAME}'!D1`
+  });
+  const value = response.data?.values?.[0]?.[0];
+  const number = Number(String(value || "").trim());
+  return Number.isFinite(number) ? number : null;
+}
+
+async function writeLastIssuedTentCodeNumber(number) {
+  await ensureTentsSheetInitialized();
+  const sheets = await getSheetsClient();
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SHEET1_ID,
+    range: `'${TENTS_SHEET_NAME}'!C1:D1`,
+    valueInputOption: "RAW",
+    requestBody: { values: [["last_issued_code_number", String(number)]] }
+  });
+}
+
+async function createTent({ name }) {
+  const normalizedName = normalizeTentName(name);
+  if (!normalizedName) throw new Error("missing name");
+  const existing = await findTentByName(normalizedName);
+  if (existing) throw new Error("duplicate name");
+
+  const tents = await listTents();
+  let maxNumber = BASE_TENT_CODE_NUMBER;
+  for (const tent of tents) {
+    const n = parseTentCodeNumber(tent.code);
+    if (n != null && n > maxNumber) maxNumber = n;
+  }
+  const lastIssued = await readLastIssuedTentCodeNumber();
+  const base = Math.max(maxNumber, lastIssued != null ? lastIssued : BASE_TENT_CODE_NUMBER);
+  const nextNumber = base + 1;
+  const code = `JCD${String(nextNumber).padStart(8, "0")}`;
+
+  const sheets = await getSheetsClient();
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: SHEET1_ID,
+    range: `'${TENTS_SHEET_NAME}'!A:B`,
+    valueInputOption: "RAW",
+    insertDataOption: "INSERT_ROWS",
+    requestBody: { values: [[code, name]] }
+  });
+
+  await writeLastIssuedTentCodeNumber(nextNumber);
+  return { code, name };
+}
+
+async function updateTent({ code, name }) {
+  const normalizedName = normalizeTentName(name);
+  if (!normalizedName) throw new Error("missing name");
+  const row = await findTentByCode(code);
+  if (!row) throw new Error("not found");
+
+  const existing = await findTentByName(normalizedName);
+  if (existing && existing.code !== row.code) throw new Error("duplicate name");
+
+  const sheets = await getSheetsClient();
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SHEET1_ID,
+    range: `'${TENTS_SHEET_NAME}'!B${row.rowNumber}`,
+    valueInputOption: "RAW",
+    requestBody: { values: [[name]] }
+  });
+
+  return { code: row.code, name };
+}
+
+async function deleteTent({ code }) {
+  const row = await findTentByCode(code);
+  if (!row) throw new Error("not found");
+  if (row.rowNumber === 1) throw new Error("cannot delete header");
+
+  const { sheetId } = await ensureTentsSheetInitialized();
+  const sheets = await getSheetsClient();
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: SHEET1_ID,
+    requestBody: {
+      requests: [
+        {
+          deleteDimension: {
+            range: {
+              sheetId,
+              dimension: "ROWS",
+              startIndex: row.rowNumber - 1,
+              endIndex: row.rowNumber
+            }
+          }
+        }
+      ]
+    }
+  });
+  return { ok: true };
+}
+
+async function getCodeTentNameForSheetFromTents(name) {
+  const tent = await findTentByName(name);
+  const code = String(tent?.code || "").trim();
+  const cleanName = String(tent?.name || name || "").trim();
+  if (code) return `${code} ${cleanName}`.trim();
+  return getCodeTentNameForSheet(cleanName);
+}
 
 function normalizeServiceDate(value) {
   return formatServiceDateDDMMYYYY(value);
@@ -221,7 +494,7 @@ async function getCaseByDateAndPlate({ date, plate }) {
 async function appendPriceRow({ date, plate, price, dealerSales, tentName, status, timestamp }) {
   getRequiredEnv("SHEET1_ID");
   const serviceDate = normalizeServiceDate(date);
-  const codeTentName = getCodeTentNameForSheet(tentName);
+  const codeTentName = await getCodeTentNameForSheetFromTents(tentName);
   const sheets = await getSheetsClient();
   const range = `'${SHEET1_NAME}'!A:G`;
   const response = await sheets.spreadsheets.values.append({
@@ -325,5 +598,9 @@ module.exports = {
   getPlatesByDate,
   getCaseByDateAndPlate,
   appendPriceRow,
-  getBranchDaySummary
+  getBranchDaySummary,
+  listTents,
+  createTent,
+  updateTent,
+  deleteTent
 };

@@ -1,4 +1,4 @@
-const tents = [
+const fallbackTents = [
   "พี่ไผ่/51 car",
   "พี่เจน/Tk good car กาญจนา",
   "พี่ดา/ดาศรีนครินทร์",
@@ -282,6 +282,13 @@ const $dealStatusMenu = document.getElementById("dealStatusMenu");
 const $submit = document.getElementById("submit");
 const $reset = document.getElementById("reset");
 const $status = document.getElementById("status");
+const $manageTents = document.getElementById("manageTents");
+const $tentsModal = document.getElementById("tentsModal");
+const $closeTentsModal = document.getElementById("closeTentsModal");
+const $newTentName = document.getElementById("newTentName");
+const $addTent = document.getElementById("addTent");
+const $tentsTable = document.getElementById("tentsTable");
+const $tentsModalStatus = document.getElementById("tentsModalStatus");
 
 function createDropdown({ triggerEl, menuEl, placeholder, searchInputEl, optionsContainerEl }) {
   const container = triggerEl.closest(".dropdown");
@@ -454,6 +461,141 @@ async function fetchJson(url) {
   return json;
 }
 
+async function fetchJsonWithOptions(url, options) {
+  const response = await fetch(url, options);
+  const json = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(json.error || `HTTP ${response.status}`);
+  }
+  return json;
+}
+
+function setTentsModalStatus(text, type) {
+  $tentsModalStatus.classList.remove("error", "ok");
+  if (type) $tentsModalStatus.classList.add(type);
+  $tentsModalStatus.textContent = text || "";
+}
+
+function openTentsModal() {
+  $tentsModal.classList.add("open");
+  $tentsModal.setAttribute("aria-hidden", "false");
+  setTentsModalStatus("");
+  refreshTentsTable();
+  $newTentName.value = "";
+  $newTentName.focus();
+}
+
+function closeTentsModal() {
+  $tentsModal.classList.remove("open");
+  $tentsModal.setAttribute("aria-hidden", "true");
+}
+
+function createEl(tag, attrs) {
+  const el = document.createElement(tag);
+  if (attrs) {
+    for (const [key, value] of Object.entries(attrs)) {
+      if (key === "className") el.className = value;
+      else if (key === "text") el.textContent = value;
+      else if (key.startsWith("on") && typeof value === "function") el.addEventListener(key.slice(2), value);
+      else el.setAttribute(key, value);
+    }
+  }
+  return el;
+}
+
+function renderTentsTable(tents) {
+  $tentsTable.innerHTML = "";
+
+  const header = createEl("div", { className: "tents-row header" });
+  header.appendChild(createEl("div", { text: "Code" }));
+  header.appendChild(createEl("div", { text: "ชื่อเต็นท์" }));
+  header.appendChild(createEl("div", { text: "" }));
+  $tentsTable.appendChild(header);
+
+  for (const tent of tents) {
+    const row = createEl("div", { className: "tents-row" });
+    const codeEl = createEl("div", { className: "tents-code", text: tent.code || "" });
+    const nameInput = createEl("input", { className: "input", type: "text", value: tent.name || "" });
+
+    const actions = createEl("div", { className: "tents-actions" });
+    const saveBtn = createEl("button", { className: "button", type: "button", text: "บันทึก" });
+    const deleteBtn = createEl("button", { className: "button danger", type: "button", text: "ลบ" });
+
+    saveBtn.addEventListener("click", async () => {
+      const nextName = String(nameInput.value || "").trim();
+      if (!nextName) {
+        setTentsModalStatus("กรุณากรอกชื่อเต็นท์", "error");
+        return;
+      }
+      saveBtn.disabled = true;
+      deleteBtn.disabled = true;
+      try {
+        await fetchJsonWithOptions(`/api/tents/${encodeURIComponent(tent.code)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: nextName })
+        });
+        setTentsModalStatus("บันทึกสำเร็จ", "ok");
+        await refreshTentsTable();
+        await loadTentsIntoDropdown();
+      } catch (error) {
+        setTentsModalStatus(`บันทึกไม่สำเร็จ: ${String(error.message || error)}`, "error");
+      } finally {
+        saveBtn.disabled = false;
+        deleteBtn.disabled = false;
+      }
+    });
+
+    deleteBtn.addEventListener("click", async () => {
+      if (!confirm(`ลบเต็นท์ "${tent.name}" (${tent.code}) ?`)) return;
+      saveBtn.disabled = true;
+      deleteBtn.disabled = true;
+      try {
+        await fetchJsonWithOptions(`/api/tents/${encodeURIComponent(tent.code)}`, { method: "DELETE" });
+        setTentsModalStatus("ลบสำเร็จ", "ok");
+        await refreshTentsTable();
+        await loadTentsIntoDropdown();
+      } catch (error) {
+        setTentsModalStatus(`ลบไม่สำเร็จ: ${String(error.message || error)}`, "error");
+      } finally {
+        saveBtn.disabled = false;
+        deleteBtn.disabled = false;
+      }
+    });
+
+    actions.appendChild(saveBtn);
+    actions.appendChild(deleteBtn);
+
+    row.appendChild(codeEl);
+    row.appendChild(nameInput);
+    row.appendChild(actions);
+    $tentsTable.appendChild(row);
+  }
+}
+
+async function refreshTentsTable() {
+  try {
+    setTentsModalStatus("กำลังโหลดรายชื่อเต็นท์...");
+    const { tents } = await fetchJson("/api/tents");
+    renderTentsTable(tents);
+    setTentsModalStatus("");
+  } catch (error) {
+    setTentsModalStatus(`โหลดรายชื่อเต็นท์ไม่สำเร็จ: ${String(error.message || error)}`, "error");
+  }
+}
+
+async function loadTentsIntoDropdown() {
+  try {
+    const { tents } = await fetchJson("/api/tents");
+    tentNameDropdown.setOptions((tents || []).map((t) => t.name).filter(Boolean));
+    tentNameDropdown.clear();
+    return;
+  } catch (_error) {
+    tentNameDropdown.setOptions(fallbackTents);
+    tentNameDropdown.clear();
+  }
+}
+
 async function loadDates() {
   setStatus("กำลังโหลดวันที่...");
   serviceDateDropdown.setDisabled(true);
@@ -570,8 +712,7 @@ async function submitForm() {
 }
 
 function initTents() {
-  tentNameDropdown.setOptions(tents);
-  tentNameDropdown.clear();
+  loadTentsIntoDropdown();
 }
 
 function initDealStatus() {
@@ -606,6 +747,46 @@ $tentName.addEventListener("change", maybeEnableSubmit);
 $dealStatus.addEventListener("change", maybeEnableSubmit);
 $reset.addEventListener("click", resetForm);
 $submit.addEventListener("click", submitForm);
+$manageTents.addEventListener("click", openTentsModal);
+$closeTentsModal.addEventListener("click", closeTentsModal);
+$tentsModal.addEventListener("click", (e) => {
+  const isBackdrop = e.target && e.target.getAttribute && e.target.getAttribute("data-close") === "true";
+  if (isBackdrop) closeTentsModal();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && $tentsModal.classList.contains("open")) closeTentsModal();
+});
+
+$addTent.addEventListener("click", async () => {
+  const name = String($newTentName.value || "").trim();
+  if (!name) {
+    setTentsModalStatus("กรุณากรอกชื่อเต็นท์", "error");
+    return;
+  }
+  $addTent.disabled = true;
+  try {
+    await fetchJsonWithOptions("/api/tents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name })
+    });
+    $newTentName.value = "";
+    setTentsModalStatus("เพิ่มสำเร็จ", "ok");
+    await refreshTentsTable();
+    await loadTentsIntoDropdown();
+  } catch (error) {
+    setTentsModalStatus(`เพิ่มไม่สำเร็จ: ${String(error.message || error)}`, "error");
+  } finally {
+    $addTent.disabled = false;
+  }
+});
+
+$newTentName.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    $addTent.click();
+  }
+});
 
 initTents();
 initDealStatus();

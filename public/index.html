@@ -59,7 +59,12 @@
         </div>
 
         <div class="row">
-          <label class="label" for="tentName">ชื่อเต็นท์</label>
+          <div class="label-row">
+            <label class="label" for="tentName">ชื่อเต็นท์</label>
+            <button id="manageTents" class="icon-button" type="button" aria-label="จัดการรายชื่อเต็นท์" title="จัดการรายชื่อเต็นท์">
+              <span class="icon-pencil">✎</span>
+            </button>
+          </div>
           <div class="dropdown" id="tentNameDropdown">
             <button id="tentName" class="input dropdown-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
               เลือกชื่อเต็นท์
@@ -91,6 +96,24 @@
         <div id="status" class="status" role="status"></div>
       </section>
     </main>
+
+    <div id="tentsModal" class="modal" aria-hidden="true">
+      <div class="modal-backdrop" data-close="true"></div>
+      <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="tentsModalTitle">
+        <div class="modal-header">
+          <h2 id="tentsModalTitle">จัดการรายชื่อเต็นท์</h2>
+          <button id="closeTentsModal" class="icon-button" type="button" aria-label="ปิด" title="ปิด">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="modal-actions">
+            <input id="newTentName" class="input" type="text" autocomplete="off" placeholder="เพิ่มชื่อเต็นท์ใหม่..." />
+            <button id="addTent" class="button" type="button">เพิ่ม</button>
+          </div>
+          <div id="tentsModalStatus" class="status" role="status"></div>
+          <div id="tentsTable" class="tents-table"></div>
+        </div>
+      </div>
+    </div>
 
     <script src="/app.js"></script>
   </body>
