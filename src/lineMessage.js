@@ -23,16 +23,19 @@ function getBranchAbbrev(branch) {
 
 function extractTime(timestamp) {
   const text = String(timestamp || "").trim();
-  const match = text.match(/\b(\d{2}):(\d{2})(?::\d{2})?\b/);
+  const match = text.match(/\b(\d{1,2}):(\d{2})(?::\d{2})?\b/);
   if (!match) return text;
-  return `${match[1]}:${match[2]}`;
+  return `${String(match[1]).padStart(2, "0")}:${match[2]}`;
 }
 
 function extractDateYmd(timestamp) {
   const text = String(timestamp || "").trim();
   const match = text.match(/^\s*(\d{4})-(\d{2})-(\d{2})\b/);
-  if (!match) return null;
-  return { y: match[1], m: match[2], d: match[3] };
+  if (match) return { y: match[1], m: match[2], d: match[3] };
+
+  const dmyMatch = text.match(/^\s*(\d{1,2})\/(\d{1,2})\/(\d{4})\b/);
+  if (!dmyMatch) return null;
+  return { y: dmyMatch[3], m: String(dmyMatch[2]).padStart(2, "0"), d: String(dmyMatch[1]).padStart(2, "0") };
 }
 
 function parseServiceDmy(date) {
@@ -101,10 +104,45 @@ function isAfterHours({ serviceDate, timestamp }) {
   return !(ymd.d === service.d && ymd.m === service.m && ymd.y === service.y);
 }
 
+function parseTimestampKey(value) {
+  const text = String(value || "").trim();
+
+  const ymdMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
+  if (ymdMatch) {
+    const year = Number(ymdMatch[1]);
+    const month = Number(ymdMatch[2]);
+    const day = Number(ymdMatch[3]);
+    const hour = Number(ymdMatch[4]);
+    const minute = Number(ymdMatch[5]);
+    const second = Number(ymdMatch[6]);
+    return (((((year * 100 + month) * 100 + day) * 100 + hour) * 100 + minute) * 100 + second);
+  }
+
+  const dmyMatch = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}),\s*(\d{1,2}):(\d{2}):(\d{2})/);
+  if (dmyMatch) {
+    const day = Number(dmyMatch[1]);
+    const month = Number(dmyMatch[2]);
+    const year = Number(dmyMatch[3]);
+    const hour = Number(dmyMatch[4]);
+    const minute = Number(dmyMatch[5]);
+    const second = Number(dmyMatch[6]);
+    return (((((year * 100 + month) * 100 + day) * 100 + hour) * 100 + minute) * 100 + second);
+  }
+
+  return null;
+}
+
 function compareTimestamp(a, b) {
   const sa = String(a || "").trim();
   const sb = String(b || "").trim();
-  if (sa && sb) return sa.localeCompare(sb);
+  if (sa && sb) {
+    const ka = parseTimestampKey(sa);
+    const kb = parseTimestampKey(sb);
+    if (ka != null && kb != null) return ka - kb;
+    if (ka != null && kb == null) return -1;
+    if (ka == null && kb != null) return 1;
+    return sa.localeCompare(sb);
+  }
   return sa ? 1 : sb ? -1 : 0;
 }
 
@@ -129,6 +167,7 @@ function collapseBidsByTent(bids) {
     const entry = {
       tentName,
       price: Number(bid.price) || 0,
+      status: String(bid.status || "").trim(),
       timestamp: String(bid.timestamp || "").trim()
     };
     const existing = byTent.get(tentName);
@@ -202,6 +241,7 @@ function buildBranchDayLineMessage({ branch, date, cars }) {
         plate,
         tentName: normalizeTentName(bid.tentName),
         price: Number(bid.price) || 0,
+        status: String(bid.status || "").trim(),
         timestamp: String(bid.timestamp || "").trim()
       };
       const shouldFlag =
@@ -215,9 +255,12 @@ function buildBranchDayLineMessage({ branch, date, cars }) {
       if (shouldFlag) hasFlagged = true;
       const tentName = `${shouldFlag ? "🚩" : ""}${shortenTentName(bid.tentName)}`;
       const time = extractTime(bid.timestamp);
+      const statusText = String(bid.status || "").trim();
       const movedSuffix = bid.moved ? " *ขยับราคา" : "";
       const afterHoursSuffix = isAfterHours({ serviceDate: date, timestamp: bid.timestamp }) ? " *นอกเวลา" : "";
-      lines.push(`${tentName} ${formatPrice(bid.price)} ${time}${movedSuffix}${afterHoursSuffix}`.trim());
+      lines.push(
+        `${tentName} ${formatPrice(bid.price)} ${[time, statusText].filter(Boolean).join(" ")}${movedSuffix}${afterHoursSuffix}`.trim()
+      );
     }
     if (bids.length > 0) {
       const emoji = pickFoodEmoji(`${branch}||${date}||${plate}`);

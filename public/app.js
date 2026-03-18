@@ -277,6 +277,8 @@ const $tentName = document.getElementById("tentName");
 const $tentNameMenu = document.getElementById("tentNameMenu");
 const $tentNameSearch = document.getElementById("tentNameSearch");
 const $tentNameOptions = document.getElementById("tentNameOptions");
+const $dealStatus = document.getElementById("dealStatus");
+const $dealStatusMenu = document.getElementById("dealStatusMenu");
 const $submit = document.getElementById("submit");
 const $reset = document.getElementById("reset");
 const $status = document.getElementById("status");
@@ -425,6 +427,12 @@ const tentNameDropdown = createDropdown({
   optionsContainerEl: $tentNameOptions
 });
 
+const dealStatusDropdown = createDropdown({
+  triggerEl: $dealStatus,
+  menuEl: $dealStatusMenu,
+  placeholder: "เลือกสถานะ"
+});
+
 function setStatus(text, type) {
   $status.classList.remove("error", "ok");
   if (type) $status.classList.add(type);
@@ -510,8 +518,9 @@ function maybeEnableSubmit() {
   const plate = plateDropdown.getValue();
   const price = $price.value;
   const tentName = tentNameDropdown.getValue();
+  const dealStatus = dealStatusDropdown.getValue();
   const hasCase = Boolean($branch.value || $model.value);
-  $submit.disabled = !(date && plate && price && tentName && hasCase);
+  $submit.disabled = !(date && plate && price && tentName && dealStatus && hasCase);
 }
 
 function resetForm() {
@@ -523,6 +532,7 @@ function resetForm() {
   $model.value = "";
   $price.value = "";
   tentNameDropdown.clear();
+  dealStatusDropdown.clear();
   $submit.disabled = true;
   setStatus("");
 }
@@ -532,7 +542,8 @@ async function submitForm() {
     date: serviceDateDropdown.getValue(),
     plate: plateDropdown.getValue(),
     price: $price.value,
-    tentName: tentNameDropdown.getValue()
+    tentName: tentNameDropdown.getValue(),
+    status: dealStatusDropdown.getValue()
   };
 
   setStatus("กำลังบันทึก...");
@@ -547,10 +558,10 @@ async function submitForm() {
     const json = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(json.error || `HTTP ${response.status}`);
 
-    const lineText = json.line?.ok ? "ส่งแจ้งเตือน LINE สำเร็จ" : `ส่งแจ้งเตือน LINE ไม่สำเร็จ: ${json.line?.error || "-"}`;
-    setStatus(`บันทึกสำเร็จ\n${lineText}`, json.line?.ok ? "ok" : "error");
+    setStatus("บันทึกสำเร็จ", "ok");
     $price.value = "";
     tentNameDropdown.clear();
+    dealStatusDropdown.clear();
   } catch (error) {
     setStatus(`บันทึกไม่สำเร็จ: ${String(error.message || error)}`, "error");
   } finally {
@@ -561,6 +572,11 @@ async function submitForm() {
 function initTents() {
   tentNameDropdown.setOptions(tents);
   tentNameDropdown.clear();
+}
+
+function initDealStatus() {
+  dealStatusDropdown.setOptions(["พร้อมโอน", "ดูรถ"]);
+  dealStatusDropdown.clear();
 }
 
 $serviceDate.addEventListener("change", async () => {
@@ -587,8 +603,10 @@ $price.addEventListener("input", () => {
 });
 
 $tentName.addEventListener("change", maybeEnableSubmit);
+$dealStatus.addEventListener("change", maybeEnableSubmit);
 $reset.addEventListener("click", resetForm);
 $submit.addEventListener("click", submitForm);
 
 initTents();
+initDealStatus();
 loadDates();

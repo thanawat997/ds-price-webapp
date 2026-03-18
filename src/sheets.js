@@ -2,11 +2,46 @@ const { google } = require("googleapis");
 const fs = require("fs");
 const path = require("path");
 
+const { formatServiceDateDDMMYYYY } = require("./format");
+const { getCodeTentNameForSheet } = require("./tentCodes");
+
 const SHEET1_ID = process.env.SHEET1_ID;
 const SHEET2_ID = process.env.SHEET2_ID;
 
 const SHEET1_NAME = process.env.SHEET1_NAME || "ราคารถเข้าสาขา";
 const SHEET2_NAME = process.env.SHEET2_NAME || "primary key";
+
+function normalizeServiceDate(value) {
+  return formatServiceDateDDMMYYYY(value);
+}
+
+function parseTimestampKey(value) {
+  const text = String(value || "").trim();
+
+  const ymdMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
+  if (ymdMatch) {
+    const year = Number(ymdMatch[1]);
+    const month = Number(ymdMatch[2]);
+    const day = Number(ymdMatch[3]);
+    const hour = Number(ymdMatch[4]);
+    const minute = Number(ymdMatch[5]);
+    const second = Number(ymdMatch[6]);
+    return (((((year * 100 + month) * 100 + day) * 100 + hour) * 100 + minute) * 100 + second);
+  }
+
+  const dmyMatch = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}),\s*(\d{1,2}):(\d{2}):(\d{2})/);
+  if (dmyMatch) {
+    const day = Number(dmyMatch[1]);
+    const month = Number(dmyMatch[2]);
+    const year = Number(dmyMatch[3]);
+    const hour = Number(dmyMatch[4]);
+    const minute = Number(dmyMatch[5]);
+    const second = Number(dmyMatch[6]);
+    return (((((year * 100 + month) * 100 + day) * 100 + hour) * 100 + minute) * 100 + second);
+  }
+
+  return null;
+}
 
 function getRequiredEnv(name) {
   const value = process.env[name];
@@ -110,7 +145,7 @@ async function getAvailableDates() {
   const rows = await readSheet2Values();
   const seen = new Set();
   for (const row of rows) {
-    const date = String(row[0] || "").trim();
+    const date = normalizeServiceDate(row[0]);
     if (date) seen.add(date);
   }
   const dates = Array.from(seen);
@@ -138,11 +173,12 @@ async function getAvailableDates() {
 }
 
 async function getPlatesByDate(date) {
+  const normalizedDate = normalizeServiceDate(date);
   const rows = await readSheet2Values();
   const seen = new Set();
   for (const row of rows) {
-    const rowDate = String(row[0] || "").trim();
-    if (rowDate !== date) continue;
+    const rowDate = normalizeServiceDate(row[0]);
+    if (rowDate !== normalizedDate) continue;
     const plate = String(row[1] || "").trim();
     if (plate) seen.add(plate);
   }
@@ -153,7 +189,7 @@ async function getPlatesByDate(date) {
 
 function rowToCase(row) {
   return {
-    serviceDate: String(row[0] || "").trim(),
+    serviceDate: normalizeServiceDate(row[0]),
     plate: String(row[1] || "").trim(),
     model: String(row[2] || "").trim(),
     auctionDate: String(row[3] || "").trim(),
@@ -170,12 +206,13 @@ function rowToCase(row) {
 }
 
 async function getCaseByDateAndPlate({ date, plate }) {
+  const normalizedDate = normalizeServiceDate(date);
   const rows = await readSheet2Values();
   const matches = [];
   for (const row of rows) {
-    const rowDate = String(row[0] || "").trim();
+    const rowDate = normalizeServiceDate(row[0]);
     const rowPlate = String(row[1] || "").trim();
-    if (rowDate === date && rowPlate === plate) matches.push(row);
+    if (rowDate === normalizedDate && rowPlate === plate) matches.push(row);
   }
   if (matches.length === 0) return null;
   return rowToCase(matches[0]);
@@ -183,6 +220,8 @@ async function getCaseByDateAndPlate({ date, plate }) {
 
 async function appendPriceRow({ date, plate, price, dealerSales, tentName, status, timestamp }) {
   getRequiredEnv("SHEET1_ID");
+  const serviceDate = normalizeServiceDate(date);
+  const codeTentName = getCodeTentNameForSheet(tentName);
   const sheets = await getSheetsClient();
   const range = `'${SHEET1_NAME}'!A:G`;
   const response = await sheets.spreadsheets.values.append({
@@ -191,7 +230,7 @@ async function appendPriceRow({ date, plate, price, dealerSales, tentName, statu
     valueInputOption: "USER_ENTERED",
     insertDataOption: "INSERT_ROWS",
     requestBody: {
-      values: [[date, plate, price, dealerSales, tentName, status, timestamp]]
+      values: [[serviceDate, plate, price, dealerSales, codeTentName, status, timestamp]]
     }
   });
   return {
@@ -201,11 +240,12 @@ async function appendPriceRow({ date, plate, price, dealerSales, tentName, statu
 }
 
 async function getCasesByDateAndBranch({ date, branch }) {
+  const normalizedDate = normalizeServiceDate(date);
   const rows = await readSheet2Values();
   const cases = [];
   for (const row of rows) {
-    const rowDate = String(row[0] || "").trim();
-    if (rowDate !== date) continue;
+    const rowDate = normalizeServiceDate(row[0]);
+    if (rowDate !== normalizedDate) continue;
     const caseData = rowToCase(row);
     if (String(caseData.branch || "").trim() !== String(branch || "").trim()) continue;
     if (!caseData.plate) continue;
@@ -215,31 +255,43 @@ async function getCasesByDateAndBranch({ date, branch }) {
 }
 
 async function getPriceEntriesByDate({ date }) {
+  const normalizedDate = normalizeServiceDate(date);
   const rows = await readSheet1Values();
   const entries = [];
   for (const row of rows) {
-    const rowDate = String(row[0] || "").trim();
-    if (rowDate !== date) continue;
+    const rowDate = normalizeServiceDate(row[0]);
+    if (rowDate !== normalizedDate) continue;
     const plate = String(row[1] || "").trim();
     const priceRaw = row[2];
     const price =
       typeof priceRaw === "number" ? priceRaw : Number(String(priceRaw || "").trim().replace(/,/g, ""));
-    const tentName = String(row[4] || "").trim();
+    const tentCell = String(row[4] || "").trim();
+    const codeNameMatch = tentCell.match(/^JCD\d+\s+(.+)$/);
+    const tentName = codeNameMatch ? String(codeNameMatch[1] || "").trim() : tentCell;
+    const status = String(row[5] || "").trim();
     const timestamp = String(row[6] || "").trim();
     if (!plate) continue;
     if (!Number.isFinite(price)) continue;
-    entries.push({ plate, price, tentName, timestamp });
+    entries.push({ plate, price, tentName, status, timestamp });
   }
-  entries.sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
+  entries.sort((a, b) => {
+    const ka = parseTimestampKey(a.timestamp);
+    const kb = parseTimestampKey(b.timestamp);
+    if (ka != null && kb != null) return ka - kb;
+    if (ka != null && kb == null) return -1;
+    if (ka == null && kb != null) return 1;
+    return String(a.timestamp).localeCompare(String(b.timestamp));
+  });
   return entries;
 }
 
 async function getBranchDaySummary({ date, branch }) {
-  const cases = await getCasesByDateAndBranch({ date, branch });
-  const entries = await getPriceEntriesByDate({ date });
+  const normalizedDate = normalizeServiceDate(date);
+  const cases = await getCasesByDateAndBranch({ date: normalizedDate, branch });
+  const entries = await getPriceEntriesByDate({ date: normalizedDate });
 
   const byKey = new Map();
-  const keyOf = (plate) => `${date}||${plate}`;
+  const keyOf = (plate) => `${normalizedDate}||${plate}`;
 
   for (const entry of entries) {
     const key = keyOf(entry.plate);
@@ -265,7 +317,7 @@ async function getBranchDaySummary({ date, branch }) {
     ordered.push({ plate: group.plate, model: "", note: "", bids: group.bids });
   }
 
-  return { date, branch, cars: ordered };
+  return { date: normalizedDate, branch, cars: ordered };
 }
 
 module.exports = {

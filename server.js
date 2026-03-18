@@ -6,7 +6,7 @@ const express = require("express");
 
 const { getAvailableDates, getPlatesByDate, getCaseByDateAndPlate, appendPriceRow, getBranchDaySummary } = require("./src/sheets");
 const { pushLineGroupMessage } = require("./src/line");
-const { formatBangkokTimestamp } = require("./src/format");
+const { formatBangkokTimestampForSheet } = require("./src/format");
 const { buildBranchDayLineMessage } = require("./src/lineMessage");
 
 const app = express();
@@ -59,11 +59,13 @@ app.post("/api/submit", async (req, res) => {
     const plate = String(req.body?.plate || "").trim();
     const priceInput = String(req.body?.price || "").trim();
     const tentName = String(req.body?.tentName || "").trim();
+    const status = String(req.body?.status || "").trim();
 
     if (!date) return res.status(400).json({ error: "missing date" });
     if (!plate) return res.status(400).json({ error: "missing plate" });
     if (!priceInput) return res.status(400).json({ error: "missing price" });
     if (!tentName) return res.status(400).json({ error: "missing tentName" });
+    if (!status) return res.status(400).json({ error: "missing status" });
 
     const normalizedPrice = Number(priceInput.replace(/,/g, ""));
     if (!Number.isFinite(normalizedPrice) || normalizedPrice < 0) {
@@ -74,8 +76,7 @@ app.post("/api/submit", async (req, res) => {
     if (!caseData) return res.status(404).json({ error: "case not found" });
 
     const dealerSales = String(process.env.DEFAULT_DEALER_SALES || "").trim();
-    const status = String(process.env.DEFAULT_STATUS || "บันทึกแล้ว").trim();
-    const timestamp = formatBangkokTimestamp(new Date());
+    const timestamp = formatBangkokTimestampForSheet(new Date());
 
     const appendResult = await appendPriceRow({
       date,
