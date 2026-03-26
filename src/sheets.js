@@ -539,7 +539,7 @@ async function getPriceEntriesByDate({ date }) {
     const price =
       typeof priceRaw === "number" ? priceRaw : Number(String(priceRaw || "").trim().replace(/,/g, ""));
     const tentCell = String(row[4] || "").trim();
-    const codeNameMatch = tentCell.match(/^JCD\d+\s+(.+)$/);
+    const codeNameMatch = tentCell.match(/^JCD\d+\s*(.+)$/i);
     const tentName = codeNameMatch ? String(codeNameMatch[1] || "").trim() : tentCell;
     const status = String(row[5] || "").trim();
     const timestamp = String(row[6] || "").trim();
@@ -581,7 +581,16 @@ async function getBranchDaySummary({ date, branch }) {
     const key = keyOf(c.plate);
     const group = byKey.get(key);
     if (!group || group.bids.length === 0) continue;
-    ordered.push({ plate: c.plate, model: c.model, note: c.customerStatus, bids: group.bids });
+    ordered.push({
+      plate: c.plate,
+      model: c.model,
+      note: c.customerStatus,
+      bookStatus: c.bookStatus,
+      financeAmount: c.financeAmount,
+      expectedPrice: c.expectedPrice,
+      mileage: c.mileage,
+      bids: group.bids
+    });
     byKey.delete(key);
   }
 

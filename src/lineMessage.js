@@ -56,7 +56,9 @@ function shortenTentName(name) {
 }
 
 function normalizeTentName(name) {
-  return String(name || "").replace(/\s+/g, " ").trim();
+  const s = String(name || "").replace(/\s+/g, " ").trim();
+  const match = s.match(/^JCD\d+\s*(.+)$/i);
+  return match ? match[1].trim() : s;
 }
 
 function stableHashInt(text) {
@@ -188,6 +190,13 @@ function collapseBidsByTent(bids) {
   return collapsed;
 }
 
+function formatNumberWithCommas(value) {
+  if (!value) return "";
+  const num = Number(String(value).replace(/,/g, ""));
+  if (Number.isNaN(num)) return value;
+  return new Intl.NumberFormat("th-TH").format(num);
+}
+
 function buildBranchDayLineMessage({ branch, date, cars }) {
   const header = `${getBranchAbbrev(branch)}${formatServiceDateForHeader(date)}`;
   const lines = [header];
@@ -199,6 +208,10 @@ function buildBranchDayLineMessage({ branch, date, cars }) {
       plate,
       model: String(car.model || "").trim(),
       note: String(car.note || "").trim(),
+      bookStatus: String(car.bookStatus || "").trim(),
+      financeAmount: String(car.financeAmount || "").trim(),
+      expectedPrice: String(car.expectedPrice || "").trim(),
+      mileage: String(car.mileage || "").trim(),
       bids
     };
   });
@@ -222,7 +235,20 @@ function buildBranchDayLineMessage({ branch, date, cars }) {
     const car = computedCars[i];
     const model = car.model;
     const plate = car.plate;
-    lines.push(`${i + 1}. ${[model, plate].filter(Boolean).join(" ")}`.trim());
+    
+    const extraInfo = [];
+    if (car.mileage) {
+      extraInfo.push(`เลขไมล์ : ${formatNumberWithCommas(car.mileage)}`);
+    }
+    if (String(car.bookStatus || "").includes("ติดไฟแนนซ์") && car.financeAmount) {
+      extraInfo.push(`ไฟแนนซ์ : ${formatNumberWithCommas(car.financeAmount)}`);
+    }
+    if (car.expectedPrice) {
+      extraInfo.push(`คาดหวัง : ${formatNumberWithCommas(car.expectedPrice)}`);
+    }
+    const extraStr = extraInfo.length > 0 ? ` ${extraInfo.join(" ")}` : "";
+
+    lines.push(`${i + 1}. ${[model, plate].filter(Boolean).join(" ")}${extraStr}`.trim());
     const note = car.note;
     if (note) lines.push(note);
     const bids = Array.from(car.bids || []);
