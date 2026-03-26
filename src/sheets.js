@@ -585,11 +585,6 @@ async function getBranchDaySummary({ date, branch }) {
     byKey.delete(key);
   }
 
-  for (const group of byKey.values()) {
-    if (!group.bids.length) continue;
-    ordered.push({ plate: group.plate, model: "", note: "", bids: group.bids });
-  }
-
   return { date: normalizedDate, branch, cars: ordered };
 }
 
