@@ -289,6 +289,7 @@ const $newTentName = document.getElementById("newTentName");
 const $addTent = document.getElementById("addTent");
 const $tentsTable = document.getElementById("tentsTable");
 const $tentsModalStatus = document.getElementById("tentsModalStatus");
+const $testMode = document.getElementById("testMode");
 
 function createDropdown({ triggerEl, menuEl, placeholder, searchInputEl, optionsContainerEl }) {
   const container = triggerEl.closest(".dropdown");
@@ -685,7 +686,8 @@ async function submitForm() {
     plate: plateDropdown.getValue(),
     price: $price.value,
     tentName: tentNameDropdown.getValue(),
-    status: dealStatusDropdown.getValue()
+    status: dealStatusDropdown.getValue(),
+    testMode: Boolean($testMode && $testMode.checked)
   };
 
   setStatus("กำลังบันทึก...");

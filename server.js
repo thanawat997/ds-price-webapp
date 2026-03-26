@@ -120,6 +120,7 @@ app.post("/api/submit", async (req, res) => {
     const priceInput = String(req.body?.price || "").trim();
     const tentName = String(req.body?.tentName || "").trim();
     const status = String(req.body?.status || "").trim();
+    const testMode = Boolean(req.body?.testMode);
 
     if (!date) return res.status(400).json({ error: "missing date" });
     if (!plate) return res.status(400).json({ error: "missing plate" });
@@ -154,7 +155,10 @@ app.post("/api/submit", async (req, res) => {
     let lineOk = false;
     let lineError = null;
     try {
-      await pushLineGroupMessage(messageText);
+      const toOverride = testMode
+        ? String(process.env.TEST_LINE_GROUP_ID || "C6d43778944005a9289c754ebaedb0443")
+        : undefined;
+      await pushLineGroupMessage(messageText, toOverride);
       lineOk = true;
     } catch (error) {
       lineOk = false;
