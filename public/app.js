@@ -666,7 +666,12 @@ function maybeEnableSubmit() {
   $submit.disabled = !(date && plate && price && tentName && dealStatus && hasCase);
 }
 
-function resetForm() {
+function resetForm(options) {
+  const keepStatus = Boolean(options && options.keepStatus);
+  const keepTestMode = Boolean(options && options.keepTestMode);
+  const statusText = $status.textContent || "";
+  const statusType = $status.classList.contains("error") ? "error" : $status.classList.contains("ok") ? "ok" : "";
+
   serviceDateDropdown.clear();
   plateDropdown.setOptions([]);
   plateDropdown.clear();
@@ -676,8 +681,10 @@ function resetForm() {
   $price.value = "";
   tentNameDropdown.clear();
   dealStatusDropdown.clear();
+  if (!keepTestMode && $testMode) $testMode.checked = false;
   $submit.disabled = true;
-  setStatus("");
+  if (keepStatus) setStatus(statusText, statusType || undefined);
+  else setStatus("");
 }
 
 async function submitForm() {
@@ -703,9 +710,7 @@ async function submitForm() {
     if (!response.ok) throw new Error(json.error || `HTTP ${response.status}`);
 
     setStatus("บันทึกสำเร็จ", "ok");
-    $price.value = "";
-    tentNameDropdown.clear();
-    dealStatusDropdown.clear();
+    resetForm({ keepStatus: true, keepTestMode: true });
   } catch (error) {
     setStatus(`บันทึกไม่สำเร็จ: ${String(error.message || error)}`, "error");
   } finally {
