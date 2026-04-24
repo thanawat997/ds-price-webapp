@@ -210,6 +210,7 @@ function buildBranchDayLineMessage({ branch, date, cars }) {
       note: String(car.note || "").trim(),
       bookStatus: String(car.bookStatus || "").trim(),
       financeAmount: String(car.financeAmount || "").trim(),
+      financeName: String(car.financeName || "").trim(),
       expectedPrice: String(car.expectedPrice || "").trim(),
       mileage: String(car.mileage || "").trim(),
       bids
@@ -240,8 +241,13 @@ function buildBranchDayLineMessage({ branch, date, cars }) {
     if (car.mileage) {
       extraInfo.push(`เลขไมล์ : ${formatNumberWithCommas(car.mileage)}`);
     }
-    if (String(car.bookStatus || "").includes("ติดไฟแนนซ์") && car.financeAmount) {
-      extraInfo.push(`ไฟแนนซ์ : ${formatNumberWithCommas(car.financeAmount)}`);
+    if (String(car.bookStatus || "").includes("ติดไฟแนนซ์")) {
+      if (car.financeName) {
+        extraInfo.push(`ไฟแนนซ์ : ${car.financeName}`);
+      }
+      if (car.financeAmount) {
+        extraInfo.push(`ยอดไฟแนนซ์ : ${formatNumberWithCommas(car.financeAmount)}`);
+      }
     }
     if (car.expectedPrice) {
       extraInfo.push(`คาดหวัง : ${formatNumberWithCommas(car.expectedPrice)}`);

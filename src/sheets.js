@@ -391,7 +391,7 @@ function shouldSkipHeaderRow(values) {
 async function readSheet2Values() {
   getRequiredEnv("SHEET2_ID");
   const sheets = await getSheetsClient();
-  const range = `'${SHEET2_NAME}'!A:M`;
+  const range = `'${SHEET2_NAME}'!A:N`;
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: SHEET2_ID,
     range
@@ -474,7 +474,8 @@ function rowToCase(row) {
     insurance: String(row[9] || "").trim(),
     taxExpireDate: String(row[10] || "").trim(),
     expectedPrice: String(row[11] || "").trim(),
-    mileage: String(row[12] || "").trim()
+    mileage: String(row[12] || "").trim(),
+    financeName: String(row[13] || "").trim()
   };
 }
 
@@ -587,6 +588,7 @@ async function getBranchDaySummary({ date, branch }) {
       note: c.customerStatus,
       bookStatus: c.bookStatus,
       financeAmount: c.financeAmount,
+      financeName: c.financeName,
       expectedPrice: c.expectedPrice,
       mileage: c.mileage,
       bids: group.bids
