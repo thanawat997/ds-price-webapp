@@ -9,6 +9,7 @@ const {
   getPlatesByDate,
   getCaseByDateAndPlate,
   listBiddingCars,
+  updateBiddingFieldByPrimaryKey,
   upsertFinalWindow,
   listActiveFinalCars,
   getFinalWindow,
@@ -61,6 +62,20 @@ app.get("/api/bidding-cars", async (req, res) => {
     res.json({ cars });
   } catch (error) {
     res.status(500).json({ error: toClientErrorMessage(error) });
+  }
+});
+
+app.patch("/api/bidding-cells", async (req, res) => {
+  try {
+    const primaryKey = String(req.body?.primaryKey || "").trim();
+    const field = String(req.body?.field || "").trim();
+    const value = req.body?.value;
+    const result = await updateBiddingFieldByPrimaryKey({ primaryKey, field, value });
+    res.json({ ok: true, result });
+  } catch (error) {
+    const message = toClientErrorMessage(error);
+    const status = message.includes("not found") ? 404 : message.includes("invalid") || message.includes("missing") ? 400 : 500;
+    res.status(status).json({ error: message });
   }
 });
 

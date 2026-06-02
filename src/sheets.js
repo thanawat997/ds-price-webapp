@@ -461,6 +461,13 @@ function rowToBiddingCar(row) {
     expectedPrice: String(row[15] || "").trim(),
     dsMaxPrice: String(row[18] || "").trim(),
     remark: String(row[25] || "").trim(),
+    purchasePrice: String(row[26] || "").trim(),
+    purchaseDate: normalizeServiceDate(row[27]) || String(row[27] || "").trim(),
+    salePrice: String(row[29] || "").trim(),
+    saleDate: normalizeServiceDate(row[30]) || String(row[30] || "").trim(),
+    primaryKey: String(row[33] || "").trim(),
+    mechanicReport: String(row[37] || "").trim(),
+    closeTentCode: String(row[38] || "").trim(),
     dateSortKey: parseDateSortKey(row[0])
   };
 }
@@ -582,7 +589,7 @@ async function getFinalMaxPriceMap() {
 
 async function listBiddingCars({ limit = 50 } = {}) {
   const sheets = await getSheetsClient();
-  const range = `'${BIDDING_SHEET_NAME}'!B:AA`;
+  const range = `'${BIDDING_SHEET_NAME}'!B:AN`;
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: BIDDING_SHEET_ID,
     range
@@ -635,6 +642,51 @@ async function listBiddingCars({ limit = 50 } = {}) {
   });
 
   return cars.slice(0, Math.max(1, Number(limit) || 50)).map(({ dateSortKey, ...car }) => car);
+}
+
+const BIDDING_UPDATE_FIELDS = {
+  purchasePrice: "AB",
+  purchaseDate: "AC",
+  salePrice: "AE",
+  saleDate: "AF",
+  mechanicReport: "AM",
+  closeTentCode: "AN"
+};
+
+function normalizeBiddingUpdateValue({ field, value }) {
+  const text = String(value || "").trim();
+  if (field === "purchasePrice" || field === "salePrice") {
+    if (!text) return "";
+    const number = Number(text.replace(/,/g, ""));
+    if (!Number.isFinite(number)) throw new Error("invalid price");
+    return Math.round(number);
+  }
+  return text;
+}
+
+async function updateBiddingFieldByPrimaryKey({ primaryKey, field, value }) {
+  const key = String(primaryKey || "").trim();
+  const column = BIDDING_UPDATE_FIELDS[field];
+  if (!key) throw new Error("missing primaryKey");
+  if (!column) throw new Error("invalid field");
+
+  const sheets = await getSheetsClient();
+  const keyResponse = await sheets.spreadsheets.values.get({
+    spreadsheetId: BIDDING_SHEET_ID,
+    range: `'${BIDDING_SHEET_NAME}'!AI:AI`
+  });
+  const rows = keyResponse.data.values || [];
+  const rowIndex = rows.findIndex((row) => String(row?.[0] || "").trim() === key);
+  if (rowIndex < 0) throw new Error("primary key not found");
+  const rowNumber = rowIndex + 1;
+  const normalizedValue = normalizeBiddingUpdateValue({ field, value });
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: BIDDING_SHEET_ID,
+    range: `'${BIDDING_SHEET_NAME}'!${column}${rowNumber}`,
+    valueInputOption: "USER_ENTERED",
+    requestBody: { values: [[normalizedValue]] }
+  });
+  return { rowNumber, field, value: normalizedValue };
 }
 
 async function upsertFinalWindow({ car, finalDate, startTime, endTime, startIso, endIso, timestamp, testMode = false }) {
@@ -1144,6 +1196,7 @@ module.exports = {
   getPlatesByDate,
   getCaseByDateAndPlate,
   listBiddingCars,
+  updateBiddingFieldByPrimaryKey,
   upsertFinalWindow,
   listActiveFinalCars,
   getFinalWindow,

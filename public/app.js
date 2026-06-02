@@ -656,6 +656,17 @@ function appendCell(row, value, className) {
   if (className) cell.className = className;
   cell.dataset.fullText = displayValue(value);
   row.appendChild(cell);
+  return cell;
+}
+
+function appendEditableCell(row, car, field, value, type) {
+  const displayText = type === "price" ? formatPriceValue(value) : displayValue(value);
+  const cell = appendCell(row, displayText, `editable-cell editable-${type}`);
+  cell.dataset.field = field;
+  cell.dataset.editorType = type;
+  cell.dataset.primaryKey = car.primaryKey || `${car.plate || ""} ${car.serviceDate || ""}`.trim();
+  cell.dataset.rawValue = String(value || "").trim();
+  return cell;
 }
 
 function getFinalState(final) {
@@ -766,7 +777,7 @@ function renderCars(cars) {
   if (list.length === 0) {
     const row = createEl("tr");
     const cell = createEl("td", { className: "empty-state", text: "ไม่มีรายการรถ" });
-    cell.colSpan = 18;
+    cell.colSpan = 24;
     row.appendChild(cell);
     $carsTableBody.appendChild(row);
     return;
@@ -774,6 +785,7 @@ function renderCars(cars) {
 
   for (const car of list) {
     const row = createEl("tr");
+    row.dataset.primaryKey = car.primaryKey || `${car.plate || ""} ${car.serviceDate || ""}`.trim();
     appendCell(row, car.serviceDate, ["primary-cell center-cell", isTodayServiceDate(car.serviceDate) ? "today-service-cell" : ""].filter(Boolean).join(" "));
     appendCell(row, car.branch, ["primary-cell", getBranchClass(car.branch)].filter(Boolean).join(" "));
     appendCell(row, car.location, "center-cell");
@@ -792,6 +804,12 @@ function renderCars(cars) {
     appendCell(row, car.remark);
     appendFinalCell(row, car);
     appendFinalWindowCells(row, car);
+    appendEditableCell(row, car, "purchasePrice", car.purchasePrice, "price");
+    appendEditableCell(row, car, "purchaseDate", car.purchaseDate, "date");
+    appendEditableCell(row, car, "salePrice", car.salePrice, "price");
+    appendEditableCell(row, car, "saleDate", car.saleDate, "date");
+    appendEditableCell(row, car, "mechanicReport", car.mechanicReport, "mechanic");
+    appendEditableCell(row, car, "closeTentCode", car.closeTentCode, "text");
     $carsTableBody.appendChild(row);
   }
   updateRemainingCells();
@@ -814,11 +832,47 @@ async function refreshBiddingCarsSilently() {
   if (document.hidden || window.location.hash === "#price" || window.location.hash === "#chart") return;
   try {
     const { cars } = await fetchJson("/api/bidding-cars?limit=50");
-    renderCars(cars);
+    patchCarsInPlace(cars);
     setCarsStatus("");
   } catch (error) {
     setCarsStatus(`อัปเดทรายการรถไม่สำเร็จ: ${String(error.message || error)}`, "error");
   }
+}
+
+function patchCarsInPlace(cars) {
+  const list = Array.isArray(cars) ? cars : [];
+  if ($carsTableBody.querySelector("tr[data-primary-key]") == null || list.length !== biddingCarsCache.length) {
+    renderCars(list);
+    return;
+  }
+  biddingCarsCache = list;
+  for (const car of list) {
+    const primaryKey = car.primaryKey || `${car.plate || ""} ${car.serviceDate || ""}`.trim();
+    const row = $carsTableBody.querySelector(`tr[data-primary-key="${CSS.escape(primaryKey)}"]`);
+    if (!row) {
+      renderCars(list);
+      return;
+    }
+    const updates = {
+      purchasePrice: formatPriceValue(car.purchasePrice),
+      purchaseDate: displayValue(car.purchaseDate),
+      salePrice: formatPriceValue(car.salePrice),
+      saleDate: displayValue(car.saleDate),
+      mechanicReport: displayValue(car.mechanicReport),
+      closeTentCode: displayValue(car.closeTentCode)
+    };
+    for (const [field, text] of Object.entries(updates)) {
+      const cell = row.querySelector(`td[data-field="${field}"]`);
+      if (!cell || cell.querySelector("input, select, textarea")) continue;
+      if (cell.textContent.trim() !== text) {
+        cell.textContent = text;
+        cell.dataset.fullText = text;
+        cell.classList.add("cell-updated");
+        setTimeout(() => cell.classList.remove("cell-updated"), 900);
+      }
+    }
+  }
+  updateRemainingCells();
 }
 
 function startCarsAutoRefresh() {
@@ -864,6 +918,90 @@ function showCellPopover(cell, event) {
   popover.style.top = `${Math.max(margin, top)}px`;
   clearTimeout(cellPopoverTimer);
   cellPopoverTimer = setTimeout(hideCellPopover, 3600);
+}
+
+function parseDisplayDateToInput(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!match) return "";
+  return `${match[3]}-${pad2(match[2])}-${pad2(match[1])}`;
+}
+
+function formatInputDateForDisplay(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return text;
+  return `${match[3]}/${match[2]}/${match[1]}`;
+}
+
+async function saveEditableCell(cell, value) {
+  const field = cell.dataset.field;
+  const primaryKey = cell.dataset.primaryKey;
+  cell.classList.add("saving");
+  try {
+    await fetchJsonWithOptions("/api/bidding-cells", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ primaryKey, field, value })
+    });
+    const type = cell.dataset.editorType;
+    const display = type === "price" ? formatPriceValue(value) : type === "date" ? formatInputDateForDisplay(value) || "-" : displayValue(value);
+    cell.textContent = display;
+    cell.dataset.rawValue = String(value || "").trim();
+    cell.dataset.fullText = display;
+  } catch (error) {
+    cell.textContent = `ผิดพลาด`;
+    cell.dataset.fullText = `บันทึกไม่สำเร็จ: ${String(error.message || error)}`;
+    setTimeout(() => {
+      const type = cell.dataset.editorType;
+      const raw = cell.dataset.rawValue || "";
+      cell.textContent = type === "price" ? formatPriceValue(raw) : displayValue(raw);
+    }, 900);
+  } finally {
+    cell.classList.remove("saving");
+  }
+}
+
+function startEditableCell(cell) {
+  if (!cell || cell.querySelector("input, select, textarea")) return;
+  const type = cell.dataset.editorType;
+  const rawValue = cell.dataset.rawValue || "";
+  hideCellPopover();
+  cell.textContent = "";
+  let editor;
+  if (type === "mechanic") {
+    editor = createEl("select", { className: "cell-editor" });
+    editor.appendChild(createEl("option", { value: "", text: "-" }));
+    editor.appendChild(createEl("option", { value: "รายงานสภาพตรงตามที่ช่างรายงาน", text: "สภาพตรงตามรายงาน" }));
+    editor.appendChild(createEl("option", { value: "__custom__", text: "สภาพไม่ตรงตามที่รายงาน" }));
+    editor.value = rawValue === "รายงานสภาพตรงตามที่ช่างรายงาน" ? rawValue : rawValue ? "__custom__" : "";
+  } else {
+    editor = createEl("input", { className: "cell-editor", type: type === "date" ? "date" : "text" });
+    editor.value = type === "date" ? parseDisplayDateToInput(rawValue) : rawValue;
+    if (type === "price") editor.inputMode = "numeric";
+  }
+  cell.appendChild(editor);
+  editor.focus();
+  if (editor.select) editor.select();
+
+  const finish = async () => {
+    let value = editor.value;
+    if (type === "mechanic" && value === "__custom__") {
+      value = window.prompt("กรอกรายละเอียดสภาพไม่ตรงตามที่รายงาน", rawValue && rawValue !== "รายงานสภาพตรงตามที่ช่างรายงาน" ? rawValue : "") || "";
+    }
+    if (type === "price") value = formatWithCommas(value);
+    await saveEditableCell(cell, value);
+  };
+  editor.addEventListener("change", finish, { once: true });
+  editor.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      finish();
+    }
+    if (event.key === "Escape") {
+      cell.textContent = type === "price" ? formatPriceValue(rawValue) : displayValue(rawValue);
+    }
+  });
 }
 
 function setChartStatus(text, type) {
@@ -915,11 +1053,18 @@ function renderBidLine(bid, options) {
 function renderChartDashboard(dashboard) {
   renderChartSummary(dashboard?.totals || {});
   $chartBranches.innerHTML = "";
-  const branches = dashboard?.branches || [];
-  if (branches.length === 0) {
-    $chartBranches.appendChild(createEl("div", { className: "chart-empty", text: "ไม่มีข้อมูลสำหรับวันที่นี้" }));
-    return;
+  const incomingBranches = dashboard?.branches || [];
+  const branchByType = new Map();
+  for (const branch of incomingBranches) {
+    if (getBranchClass(branch.branch) === "branch-bangna") branchByType.set("branch-bangna", branch);
+    else if (getBranchClass(branch.branch) === "branch-saphan") branchByType.set("branch-saphan", branch);
   }
+  const otherBranches = incomingBranches.filter((branch) => !["branch-bangna", "branch-saphan"].includes(getBranchClass(branch.branch)));
+  const branches = [
+    branchByType.get("branch-bangna") || { branch: "002 Lotus บางนา", cars: [] },
+    branchByType.get("branch-saphan") || { branch: "004 Big C สะพานควาย", cars: [] },
+    ...otherBranches
+  ];
 
   for (const branch of branches) {
     const panel = createEl("section", { className: "branch-panel" });
@@ -928,6 +1073,11 @@ function renderChartDashboard(dashboard) {
     header.appendChild(createEl("div", { className: "branch-title", text: branch.branch || "ไม่ระบุสาขา" }));
     header.appendChild(createEl("div", { className: "branch-count", text: `${(branch.cars || []).length} คัน` }));
     panel.appendChild(header);
+    if ((branch.cars || []).length === 0) {
+      panel.appendChild(createEl("div", { className: "chart-empty branch-empty", text: "ไม่มีข้อมูลรถสำหรับวันที่นี้" }));
+      $chartBranches.appendChild(panel);
+      continue;
+    }
 
     for (let index = 0; index < (branch.cars || []).length; index += 1) {
       const car = branch.cars[index];
@@ -1454,6 +1604,10 @@ $carsTableBody.addEventListener("click", (event) => {
   if (event.target.closest("button")) return;
   const cell = event.target.closest("td");
   if (!cell || !$carsTableBody.contains(cell)) return;
+  if (cell.classList.contains("editable-cell")) {
+    startEditableCell(cell);
+    return;
+  }
   showCellPopover(cell, event);
 });
 document.addEventListener("click", (event) => {

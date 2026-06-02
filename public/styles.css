@@ -247,7 +247,7 @@ h1 {
 }
 
 .cars-table {
-  width: 1885px;
+  width: 2605px;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 13px;
@@ -392,6 +392,52 @@ h1 {
 .cell-popover.open {
   opacity: 1;
   transform: translateY(0);
+}
+
+.editable-cell {
+  background: #ffffff;
+  cursor: text;
+}
+
+.editable-cell:hover {
+  background: #f8fafc;
+}
+
+.editable-cell.saving {
+  color: var(--muted);
+  background: #f8fafc;
+}
+
+.cell-updated {
+  animation: cell-updated 900ms ease;
+}
+
+@keyframes cell-updated {
+  0% {
+    background: #fff4cc;
+  }
+
+  100% {
+    background: #ffffff;
+  }
+}
+
+.cell-editor {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  border: 1px solid #cfd8e3;
+  border-radius: 6px;
+  padding: 6px 7px;
+  background: #ffffff;
+  color: var(--text);
+  font: inherit;
+}
+
+.branch-empty {
+  border: 0;
+  border-radius: 0;
+  min-height: 180px;
 }
 
 .calendar-button {
@@ -854,10 +900,17 @@ select.input {
 .chart-summary {
   display: flex;
   align-items: stretch;
-  justify-content: center;
+  justify-content: flex-start;
   flex-wrap: wrap;
   gap: 12px;
-  margin: 0 0 16px;
+  width: min(100%, 800px);
+  margin: 0 auto 16px;
+}
+
+@media (min-width: 1700px) {
+  .chart-summary {
+    width: min(100%, 1616px);
+  }
 }
 
 .summary-tile {
@@ -868,6 +921,7 @@ select.input {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 14px 16px;
+  text-align: center;
   box-shadow: 0 8px 22px rgba(23, 32, 42, 0.05);
 }
 
@@ -886,7 +940,7 @@ select.input {
 
 .chart-branches {
   display: grid;
-  grid-template-columns: repeat(auto-fit, 700px);
+  grid-template-columns: repeat(auto-fit, 800px);
   justify-content: center;
   gap: 16px;
 }
