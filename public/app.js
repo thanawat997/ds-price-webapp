@@ -889,9 +889,9 @@ function renderChartDateOptions(dates) {
 
 function renderChartSummary(totals) {
   const items = [
-    ["รถทั้งหมด", totals?.cars || 0],
-    ["ราคาปกติ", totals?.bids || 0],
-    ["ราคา Final", totals?.finalBids || 0]
+    ["เข้ารับบริการ", totals?.cars || 0],
+    ["จำนวนการใส่ราคาทั้งหมด", totals?.totalBids ?? (Number(totals?.bids || 0) + Number(totals?.finalBids || 0))],
+    ["เปิดFinal", totals?.finalWindows || 0]
   ];
   $chartSummary.innerHTML = "";
   for (const [label, value] of items) {
@@ -904,10 +904,11 @@ function renderChartSummary(totals) {
 
 function renderBidLine(bid, options) {
   const line = createEl("div", { className: `bid-line${options?.isFinal ? " final-bid" : ""}` });
-  line.appendChild(createEl("div", { className: "bid-tent", text: displayValue(bid.tentName) }));
-  line.appendChild(createEl("div", { className: "bid-price", text: normalizeNumberText(bid.price) }));
-  line.appendChild(createEl("div", { className: "bid-time", text: extractTimeText(bid.timestamp) || "-" }));
-  line.appendChild(createEl("div", { className: "bid-status", text: displayValue(bid.status) }));
+  const statusText = `${displayValue(bid.status)}${options?.isFinal && options?.hasFinalWindow ? " 🚨" : ""}`;
+  line.appendChild(createEl("span", { className: "bid-tent", text: displayValue(bid.tentName) }));
+  line.appendChild(createEl("span", { className: "bid-price", text: normalizeNumberText(bid.price) }));
+  line.appendChild(createEl("span", { className: "bid-time", text: extractTimeText(bid.timestamp) || "-" }));
+  line.appendChild(createEl("span", { className: "bid-status", text: statusText }));
   return line;
 }
 
@@ -958,7 +959,7 @@ function renderChartDashboard(dashboard) {
         bidList.appendChild(createEl("div", { className: "bid-line", text: "ยังไม่มีราคา" }));
       } else {
         for (const bid of bids) bidList.appendChild(renderBidLine(bid));
-        for (const bid of finalBids) bidList.appendChild(renderBidLine(bid, { isFinal: true }));
+        for (const bid of finalBids) bidList.appendChild(renderBidLine(bid, { isFinal: true, hasFinalWindow: car.hasFinalWindow }));
       }
       layout.appendChild(bidList);
       carCard.appendChild(layout);

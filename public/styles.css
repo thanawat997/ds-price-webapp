@@ -638,10 +638,11 @@ select.input {
 }
 
 .button.primary-action {
-  background: var(--primary);
-  border-color: var(--primary);
-  color: #ffffff;
+  background: #ffffff;
+  border-color: #d8dee6;
+  color: var(--text);
   min-width: 120px;
+  box-shadow: 0 4px 12px rgba(23, 32, 42, 0.08);
 }
 
 .button.final-action {
@@ -851,13 +852,17 @@ select.input {
 }
 
 .chart-summary {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
   gap: 12px;
   margin: 0 0 16px;
 }
 
 .summary-tile {
+  flex: 0 0 200px;
+  width: 200px;
+  box-sizing: border-box;
   background: #ffffff;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1006,11 +1011,12 @@ select.input {
 }
 
 .bid-line {
-  display: grid;
-  grid-template-columns: minmax(120px, 1fr) 90px 54px 78px;
-  gap: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   align-items: center;
   font-size: 13px;
+  min-width: 0;
 }
 
 .bid-line.final-bid {
@@ -1025,7 +1031,6 @@ select.input {
 }
 
 .bid-price {
-  text-align: right;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
 }

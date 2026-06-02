@@ -1028,6 +1028,13 @@ async function getPriceDashboardByDate({ date }) {
   } catch (_error) {
     finalEntries = [];
   }
+  let finalWindows = [];
+  try {
+    finalWindows = (await readFinalWindows()).filter((window) => normalizeServiceDate(window.serviceDate) === normalizedDate);
+  } catch (_error) {
+    finalWindows = [];
+  }
+  const finalWindowPlates = new Set(finalWindows.map((window) => String(window.plate || "").trim()).filter(Boolean));
 
   const entriesByPlate = new Map();
   const addEntry = (entry) => {
@@ -1061,6 +1068,7 @@ async function getPriceDashboardByDate({ date }) {
       finalBids,
       bidCount: regularBids.length,
       finalBidCount: finalBids.length,
+      hasFinalWindow: finalWindowPlates.has(String(c.plate || "").trim()),
       maxPrice: maxPrice || "",
       maxFinalPrice: maxFinalPrice || ""
     });
@@ -1084,7 +1092,9 @@ async function getPriceDashboardByDate({ date }) {
       branches: branchSummaries.length,
       cars: cases.length,
       bids: priceEntries.length,
-      finalBids: finalEntries.length
+      finalBids: finalEntries.length,
+      totalBids: priceEntries.length + finalEntries.length,
+      finalWindows: finalWindowPlates.size
     }
   };
 }
