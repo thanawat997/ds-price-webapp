@@ -7,10 +7,15 @@ const { getCodeTentNameForSheet, getTentCode } = require("./tentCodes");
 
 const SHEET1_ID = process.env.SHEET1_ID;
 const SHEET2_ID = process.env.SHEET2_ID;
+const BIDDING_SHEET_ID = process.env.BIDDING_SHEET_ID || "1z8gQ28xlAF6cAwB6siqa6ubFb0WjoUzGy1vA8_MnJGw";
+const FINAL_PRICE_SHEET_ID = process.env.FINAL_PRICE_SHEET_ID || "18wgdWsuergmNyCeENa-c-kGwyDx_xDEehHTuNjxLySo";
 
 const SHEET1_NAME = process.env.SHEET1_NAME || "ราคารถเข้าสาขา";
 const SHEET2_NAME = process.env.SHEET2_NAME || "primary key";
 const TENTS_SHEET_NAME = process.env.TENTS_SHEET_NAME || "tents";
+const BIDDING_SHEET_NAME = process.env.BIDDING_SHEET_NAME || "Bidding";
+const FINAL_PRICE_SHEET_NAME = process.env.FINAL_PRICE_SHEET_NAME || "ราคาFinal";
+const FINAL_WINDOWS_SHEET_NAME = process.env.FINAL_WINDOWS_SHEET_NAME || "FinalWindows";
 
 const BASE_TENT_CODE_NUMBER = 67100033;
 
@@ -316,6 +321,32 @@ function parseTimestampKey(value) {
   return null;
 }
 
+function parseDateSortKey(value) {
+  const normalized = normalizeServiceDate(value);
+  const dmyMatch = String(normalized || "").match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (dmyMatch) {
+    const day = Number(dmyMatch[1]);
+    const month = Number(dmyMatch[2]);
+    const year = Number(dmyMatch[3]);
+    if (Number.isFinite(day) && Number.isFinite(month) && Number.isFinite(year)) {
+      return Date.UTC(year, month - 1, day);
+    }
+  }
+
+  const text = String(value || "").trim();
+  const ymdMatch = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (ymdMatch) {
+    const year = Number(ymdMatch[1]);
+    const month = Number(ymdMatch[2]);
+    const day = Number(ymdMatch[3]);
+    if (Number.isFinite(day) && Number.isFinite(month) && Number.isFinite(year)) {
+      return Date.UTC(year, month - 1, day);
+    }
+  }
+
+  return null;
+}
+
 function getRequiredEnv(name) {
   const value = process.env[name];
   if (!value) throw new Error(`Missing env: ${name}`);
@@ -412,6 +443,357 @@ async function readSheet1Values() {
   const values = response.data.values || [];
   if (values.length === 0) return [];
   return shouldSkipHeaderRow(values) ? values.slice(1) : values;
+}
+
+function rowToBiddingCar(row) {
+  return {
+    serviceDate: normalizeServiceDate(row[0]) || String(row[0] || "").trim(),
+    branch: String(row[2] || "").trim(),
+    location: String(row[3] || "").trim(),
+    plate: String(row[4] || "").trim(),
+    brand: String(row[5] || "").trim(),
+    model: String(row[6] || "").trim(),
+    subModel: String(row[7] || "").trim(),
+    year: String(row[8] || "").trim(),
+    mileage: String(row[9] || "").trim(),
+    fuel: String(row[11] || "").trim(),
+    condition: String(row[13] || "").trim(),
+    expectedPrice: String(row[15] || "").trim(),
+    dsMaxPrice: String(row[18] || "").trim(),
+    remark: String(row[25] || "").trim(),
+    dateSortKey: parseDateSortKey(row[0])
+  };
+}
+
+function finalWindowKey({ serviceDate, plate }) {
+  return `${normalizeServiceDate(serviceDate)}||${String(plate || "").trim()}`;
+}
+
+function rowToFinalWindow(row, index) {
+  const serviceDate = normalizeServiceDate(row[0]) || String(row[0] || "").trim();
+  const plate = String(row[1] || "").trim();
+  return {
+    rowNumber: index + 1,
+    serviceDate,
+    plate,
+    branch: String(row[2] || "").trim(),
+    location: String(row[3] || "").trim(),
+    brand: String(row[4] || "").trim(),
+    model: String(row[5] || "").trim(),
+    subModel: String(row[6] || "").trim(),
+    year: String(row[7] || "").trim(),
+    mileage: String(row[8] || "").trim(),
+    fuel: String(row[9] || "").trim(),
+    condition: String(row[10] || "").trim(),
+    expectedPrice: String(row[11] || "").trim(),
+    dsMaxPrice: String(row[12] || "").trim(),
+    remark: String(row[13] || "").trim(),
+    finalDate: String(row[14] || "").trim(),
+    startTime: String(row[15] || "").trim(),
+    endTime: String(row[16] || "").trim(),
+    startIso: String(row[17] || "").trim(),
+    endIso: String(row[18] || "").trim(),
+    notifiedAt: String(row[19] || "").trim(),
+    createdAt: String(row[20] || "").trim(),
+    updatedAt: String(row[21] || "").trim(),
+    testMode: String(row[22] || "").trim() === "TRUE"
+  };
+}
+
+async function ensureFinalWindowsSheetInitialized() {
+  await ensureSheetExists({ spreadsheetId: FINAL_PRICE_SHEET_ID, title: FINAL_WINDOWS_SHEET_NAME });
+  const sheets = await getSheetsClient();
+  const range = `'${FINAL_WINDOWS_SHEET_NAME}'!A1:W1`;
+  const current = await sheets.spreadsheets.values.get({ spreadsheetId: FINAL_PRICE_SHEET_ID, range });
+  const first = current.data?.values?.[0] || [];
+  if (first.some((v) => String(v || "").trim())) return;
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: FINAL_PRICE_SHEET_ID,
+    range: `'${FINAL_WINDOWS_SHEET_NAME}'!A1`,
+    valueInputOption: "RAW",
+    requestBody: {
+      values: [[
+        "วันที่เข้ารับบริการ",
+        "ทะเบียน",
+        "สาขา",
+        "สถานที่",
+        "ยี่ห้อ",
+        "รุ่น",
+        "รุ่นย่อย",
+        "ปี",
+        "เลขไมล์",
+        "เชื้อเพลิง",
+        "สภาพ",
+        "ราคาคาดหวัง",
+        "ราคาสูงสุดDS",
+        "หมายเหตุ",
+        "วันที่เปิดFinal",
+        "เวลาเริ่ม",
+        "เวลาจบ",
+        "startIso",
+        "endIso",
+        "notifiedAt",
+        "createdAt",
+        "updatedAt",
+        "testMode"
+      ]]
+    }
+  });
+}
+
+async function readFinalWindows() {
+  await ensureFinalWindowsSheetInitialized();
+  const sheets = await getSheetsClient();
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: FINAL_PRICE_SHEET_ID,
+    range: `'${FINAL_WINDOWS_SHEET_NAME}'!A:W`
+  });
+  const values = response.data.values || [];
+  return values
+    .map(rowToFinalWindow)
+    .filter((window) => window.rowNumber !== 1 && window.serviceDate && window.plate);
+}
+
+async function readFinalPriceRows() {
+  await ensureSheetExists({ spreadsheetId: FINAL_PRICE_SHEET_ID, title: FINAL_PRICE_SHEET_NAME });
+  const sheets = await getSheetsClient();
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: FINAL_PRICE_SHEET_ID,
+    range: `'${FINAL_PRICE_SHEET_NAME}'!A:I`
+  });
+  const values = response.data.values || [];
+  return shouldSkipHeaderRow(values) ? values.slice(1) : values;
+}
+
+async function getFinalMaxPriceMap() {
+  const rows = await readFinalPriceRows();
+  const byKey = new Map();
+  for (const row of rows) {
+    const serviceDate = normalizeServiceDate(row[0]);
+    const plate = String(row[1] || "").trim();
+    const price = Number(String(row[2] || "").trim().replace(/,/g, ""));
+    if (!serviceDate || !plate || !Number.isFinite(price)) continue;
+    const key = finalWindowKey({ serviceDate, plate });
+    const current = byKey.get(key);
+    if (current == null || price > current) byKey.set(key, price);
+  }
+  return byKey;
+}
+
+async function listBiddingCars({ limit = 50 } = {}) {
+  const sheets = await getSheetsClient();
+  const range = `'${BIDDING_SHEET_NAME}'!B:AA`;
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: BIDDING_SHEET_ID,
+    range
+  });
+  const values = response.data.values || [];
+  const rows = shouldSkipHeaderRow(values) ? values.slice(1) : values;
+  const cars = rows.map(rowToBiddingCar).filter((car) => car.serviceDate || car.plate || car.branch);
+  let finalWindows = [];
+  try {
+    finalWindows = await readFinalWindows();
+  } catch (_error) {
+    finalWindows = [];
+  }
+  let finalMaxPriceByKey = new Map();
+  try {
+    finalMaxPriceByKey = await getFinalMaxPriceMap();
+  } catch (_error) {
+    finalMaxPriceByKey = new Map();
+  }
+  const finalByKey = new Map(finalWindows.map((window) => [finalWindowKey(window), window]));
+
+  for (const car of cars) {
+    const key = finalWindowKey(car);
+    const finalWindow = finalByKey.get(key);
+    if (finalWindow) {
+      car.final = {
+        finalDate: finalWindow.finalDate,
+        startTime: finalWindow.startTime,
+        endTime: finalWindow.endTime,
+        startIso: finalWindow.startIso,
+        endIso: finalWindow.endIso,
+        notifiedAt: finalWindow.notifiedAt
+      };
+    } else {
+      car.final = null;
+    }
+    const finalMaxPrice = finalMaxPriceByKey.get(key);
+    car.finalMaxPrice = finalMaxPrice == null ? "" : String(finalMaxPrice);
+  }
+
+  cars.sort((a, b) => {
+    if (a.dateSortKey != null && b.dateSortKey != null && a.dateSortKey !== b.dateSortKey) {
+      return b.dateSortKey - a.dateSortKey;
+    }
+    if (a.dateSortKey != null && b.dateSortKey == null) return -1;
+    if (a.dateSortKey == null && b.dateSortKey != null) return 1;
+    const dateCompare = String(b.serviceDate || "").localeCompare(String(a.serviceDate || ""), "th-TH");
+    if (dateCompare !== 0) return dateCompare;
+    return String(a.branch || "").localeCompare(String(b.branch || ""), "th-TH");
+  });
+
+  return cars.slice(0, Math.max(1, Number(limit) || 50)).map(({ dateSortKey, ...car }) => car);
+}
+
+async function upsertFinalWindow({ car, finalDate, startTime, endTime, startIso, endIso, timestamp, testMode = false }) {
+  const cleanCar = {
+    serviceDate: normalizeServiceDate(car.serviceDate),
+    plate: String(car.plate || "").trim(),
+    branch: String(car.branch || "").trim(),
+    location: String(car.location || "").trim(),
+    brand: String(car.brand || "").trim(),
+    model: String(car.model || "").trim(),
+    subModel: String(car.subModel || "").trim(),
+    year: String(car.year || "").trim(),
+    mileage: String(car.mileage || "").trim(),
+    fuel: String(car.fuel || "").trim(),
+    condition: String(car.condition || "").trim(),
+    expectedPrice: String(car.expectedPrice || "").trim(),
+    dsMaxPrice: String(car.dsMaxPrice || "").trim(),
+    remark: String(car.remark || "").trim()
+  };
+  if (!cleanCar.serviceDate) throw new Error("missing serviceDate");
+  if (!cleanCar.plate) throw new Error("missing plate");
+
+  await ensureFinalWindowsSheetInitialized();
+  const windows = await readFinalWindows();
+  const existing = windows.find((window) => finalWindowKey(window) === finalWindowKey(cleanCar));
+  const values = [[
+    cleanCar.serviceDate,
+    cleanCar.plate,
+    cleanCar.branch,
+    cleanCar.location,
+    cleanCar.brand,
+    cleanCar.model,
+    cleanCar.subModel,
+    cleanCar.year,
+    cleanCar.mileage,
+    cleanCar.fuel,
+    cleanCar.condition,
+    cleanCar.expectedPrice,
+    cleanCar.dsMaxPrice,
+    cleanCar.remark,
+    finalDate,
+    startTime,
+    endTime,
+    startIso,
+    endIso,
+    "",
+    existing?.createdAt || timestamp,
+    timestamp,
+    testMode ? "TRUE" : "FALSE"
+  ]];
+
+  const sheets = await getSheetsClient();
+  if (existing) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: FINAL_PRICE_SHEET_ID,
+      range: `'${FINAL_WINDOWS_SHEET_NAME}'!A${existing.rowNumber}:W${existing.rowNumber}`,
+      valueInputOption: "RAW",
+      requestBody: { values }
+    });
+  } else {
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: FINAL_PRICE_SHEET_ID,
+      range: `'${FINAL_WINDOWS_SHEET_NAME}'!A:W`,
+      valueInputOption: "RAW",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: { values }
+    });
+  }
+
+  return rowToFinalWindow(values[0], (existing?.rowNumber || 1) - 1);
+}
+
+async function listActiveFinalCars({ now = new Date() } = {}) {
+  const nowMs = now.getTime();
+  const windows = await readFinalWindows();
+  return windows
+    .filter((window) => {
+      const startMs = Date.parse(window.startIso);
+      const endMs = Date.parse(window.endIso);
+      return Number.isFinite(startMs) && Number.isFinite(endMs) && startMs <= nowMs && nowMs <= endMs;
+    })
+    .sort((a, b) => String(a.branch || "").localeCompare(String(b.branch || ""), "th-TH"));
+}
+
+async function getFinalWindow({ date, plate }) {
+  const windows = await readFinalWindows();
+  return windows.find((window) => finalWindowKey(window) === finalWindowKey({ serviceDate: date, plate })) || null;
+}
+
+async function listDueFinalWindows({ now = new Date() } = {}) {
+  const nowMs = now.getTime();
+  const windows = await readFinalWindows();
+  return windows.filter((window) => {
+    if (window.notifiedAt) return false;
+    const endMs = Date.parse(window.endIso);
+    return Number.isFinite(endMs) && endMs < nowMs;
+  });
+}
+
+async function markFinalWindowNotified({ date, plate, timestamp }) {
+  const window = await getFinalWindow({ date, plate });
+  if (!window) throw new Error("final window not found");
+  const sheets = await getSheetsClient();
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: FINAL_PRICE_SHEET_ID,
+    range: `'${FINAL_WINDOWS_SHEET_NAME}'!T${window.rowNumber}`,
+    valueInputOption: "RAW",
+    requestBody: { values: [[timestamp]] }
+  });
+}
+
+async function deleteFinalWindow({ date, plate }) {
+  const window = await getFinalWindow({ date, plate });
+  if (!window) throw new Error("final window not found");
+  if (window.rowNumber === 1) throw new Error("cannot delete header");
+
+  const sheetId = await ensureSheetExists({
+    spreadsheetId: FINAL_PRICE_SHEET_ID,
+    title: FINAL_WINDOWS_SHEET_NAME
+  });
+  const sheets = await getSheetsClient();
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: FINAL_PRICE_SHEET_ID,
+    requestBody: {
+      requests: [
+        {
+          deleteDimension: {
+            range: {
+              sheetId,
+              dimension: "ROWS",
+              startIndex: window.rowNumber - 1,
+              endIndex: window.rowNumber
+            }
+          }
+        }
+      ]
+    }
+  });
+  return { ok: true };
+}
+
+async function appendFinalPriceRow({ date, plate, price, dealerSales, tentName, status, note, timestamp }) {
+  await ensureSheetExists({ spreadsheetId: FINAL_PRICE_SHEET_ID, title: FINAL_PRICE_SHEET_NAME });
+  const serviceDate = normalizeServiceDate(date);
+  const codeTentName = await getCodeTentNameForSheetFromTents(tentName);
+  const sheets = await getSheetsClient();
+  const response = await sheets.spreadsheets.values.append({
+    spreadsheetId: FINAL_PRICE_SHEET_ID,
+    range: `'${FINAL_PRICE_SHEET_NAME}'!A:I`,
+    valueInputOption: "USER_ENTERED",
+    insertDataOption: "INSERT_ROWS",
+    requestBody: {
+      values: [[serviceDate, plate, price, dealerSales, codeTentName, status, note, timestamp, "JUSTCAR"]]
+    }
+  });
+  return {
+    updatedRange: response.data?.updates?.updatedRange || null,
+    updatedRows: response.data?.updates?.updatedRows || null
+  };
 }
 
 async function getAvailableDates() {
@@ -559,6 +941,154 @@ async function getPriceEntriesByDate({ date }) {
   return entries;
 }
 
+async function getFinalPriceEntriesByDateAndPlate({ date, plate }) {
+  const normalizedDate = normalizeServiceDate(date);
+  const normalizedPlate = String(plate || "").trim();
+  const rows = await readFinalPriceRows();
+  const entries = [];
+  for (const row of rows) {
+    const rowDate = normalizeServiceDate(row[0]);
+    const rowPlate = String(row[1] || "").trim();
+    if (rowDate !== normalizedDate || rowPlate !== normalizedPlate) continue;
+    const priceRaw = row[2];
+    const price =
+      typeof priceRaw === "number" ? priceRaw : Number(String(priceRaw || "").trim().replace(/,/g, ""));
+    const tentCell = String(row[4] || "").trim();
+    const codeNameMatch = tentCell.match(/^JCD\d+\s*(.+)$/i);
+    const tentName = codeNameMatch ? String(codeNameMatch[1] || "").trim() : tentCell;
+    const status = String(row[5] || "").trim();
+    const note = String(row[6] || "").trim();
+    const timestamp = String(row[7] || "").trim();
+    if (!Number.isFinite(price)) continue;
+    entries.push({ plate: rowPlate, price, tentName, status, note, timestamp });
+  }
+  entries.sort((a, b) => {
+    const pa = Number(a.price) || 0;
+    const pb = Number(b.price) || 0;
+    if (pb !== pa) return pb - pa;
+    const ka = parseTimestampKey(a.timestamp);
+    const kb = parseTimestampKey(b.timestamp);
+    if (ka != null && kb != null) return ka - kb;
+    if (ka != null && kb == null) return -1;
+    if (ka == null && kb != null) return 1;
+    return String(a.timestamp).localeCompare(String(b.timestamp));
+  });
+  return entries;
+}
+
+async function getFinalPriceEntriesByDate({ date }) {
+  const normalizedDate = normalizeServiceDate(date);
+  const rows = await readFinalPriceRows();
+  const entries = [];
+  for (const row of rows) {
+    const rowDate = normalizeServiceDate(row[0]);
+    if (rowDate !== normalizedDate) continue;
+    const plate = String(row[1] || "").trim();
+    const priceRaw = row[2];
+    const price =
+      typeof priceRaw === "number" ? priceRaw : Number(String(priceRaw || "").trim().replace(/,/g, ""));
+    const tentCell = String(row[4] || "").trim();
+    const codeNameMatch = tentCell.match(/^JCD\d+\s*(.+)$/i);
+    const tentName = codeNameMatch ? String(codeNameMatch[1] || "").trim() : tentCell;
+    const status = String(row[5] || "").trim();
+    const note = String(row[6] || "").trim();
+    const timestamp = String(row[7] || "").trim();
+    if (!plate || !Number.isFinite(price)) continue;
+    entries.push({ plate, price, tentName, status, note, timestamp, isFinal: true });
+  }
+  entries.sort((a, b) => {
+    const pa = Number(a.price) || 0;
+    const pb = Number(b.price) || 0;
+    if (pb !== pa) return pb - pa;
+    const ka = parseTimestampKey(a.timestamp);
+    const kb = parseTimestampKey(b.timestamp);
+    if (ka != null && kb != null) return ka - kb;
+    if (ka != null && kb == null) return -1;
+    if (ka == null && kb != null) return 1;
+    return String(a.timestamp).localeCompare(String(b.timestamp));
+  });
+  return entries;
+}
+
+async function getPriceDashboardByDate({ date }) {
+  const normalizedDate = normalizeServiceDate(date);
+  const rows = await readSheet2Values();
+  const cases = [];
+  for (const row of rows) {
+    if (normalizeServiceDate(row[0]) !== normalizedDate) continue;
+    const caseData = rowToCase(row);
+    if (!caseData.plate) continue;
+    cases.push(caseData);
+  }
+
+  const priceEntries = await getPriceEntriesByDate({ date: normalizedDate });
+  let finalEntries = [];
+  try {
+    finalEntries = await getFinalPriceEntriesByDate({ date: normalizedDate });
+  } catch (_error) {
+    finalEntries = [];
+  }
+
+  const entriesByPlate = new Map();
+  const addEntry = (entry) => {
+    const plate = String(entry.plate || "").trim();
+    if (!plate) return;
+    const list = entriesByPlate.get(plate) || [];
+    list.push(entry);
+    entriesByPlate.set(plate, list);
+  };
+  for (const entry of priceEntries) addEntry({ ...entry, isFinal: false });
+  for (const entry of finalEntries) addEntry(entry);
+
+  const branches = new Map();
+  for (const c of cases) {
+    const branch = String(c.branch || "ไม่ระบุสาขา").trim();
+    if (!branches.has(branch)) branches.set(branch, []);
+    const bids = entriesByPlate.get(c.plate) || [];
+    const regularBids = bids.filter((bid) => !bid.isFinal);
+    const finalBids = bids.filter((bid) => bid.isFinal);
+    const maxPrice = regularBids.reduce((max, bid) => Math.max(max, Number(bid.price) || 0), 0);
+    const maxFinalPrice = finalBids.reduce((max, bid) => Math.max(max, Number(bid.price) || 0), 0);
+    branches.get(branch).push({
+      serviceDate: normalizedDate,
+      plate: c.plate,
+      model: c.model,
+      branch,
+      expectedPrice: c.expectedPrice,
+      mileage: c.mileage,
+      note: c.note || c.customerStatus,
+      regularBids,
+      finalBids,
+      bidCount: regularBids.length,
+      finalBidCount: finalBids.length,
+      maxPrice: maxPrice || "",
+      maxFinalPrice: maxFinalPrice || ""
+    });
+  }
+
+  const branchSummaries = Array.from(branches.entries()).map(([branch, cars]) => {
+    cars.sort((a, b) => {
+      const aHas = a.regularBids.length + a.finalBids.length;
+      const bHas = b.regularBids.length + b.finalBids.length;
+      if (bHas !== aHas) return bHas - aHas;
+      return String(a.plate).localeCompare(String(b.plate), "th-TH");
+    });
+    return { branch, cars };
+  });
+  branchSummaries.sort((a, b) => a.branch.localeCompare(b.branch, "th-TH"));
+
+  return {
+    date: normalizedDate,
+    branches: branchSummaries,
+    totals: {
+      branches: branchSummaries.length,
+      cars: cases.length,
+      bids: priceEntries.length,
+      finalBids: finalEntries.length
+    }
+  };
+}
+
 async function getBranchDaySummary({ date, branch }) {
   const normalizedDate = normalizeServiceDate(date);
   const cases = await getCasesByDateAndBranch({ date: normalizedDate, branch });
@@ -603,6 +1133,16 @@ module.exports = {
   getAvailableDates,
   getPlatesByDate,
   getCaseByDateAndPlate,
+  listBiddingCars,
+  upsertFinalWindow,
+  listActiveFinalCars,
+  getFinalWindow,
+  listDueFinalWindows,
+  markFinalWindowNotified,
+  deleteFinalWindow,
+  appendFinalPriceRow,
+  getFinalPriceEntriesByDateAndPlate,
+  getPriceDashboardByDate,
   appendPriceRow,
   getBranchDaySummary,
   listTents,

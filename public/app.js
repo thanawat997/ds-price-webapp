@@ -290,6 +290,42 @@ const $addTent = document.getElementById("addTent");
 const $tentsTable = document.getElementById("tentsTable");
 const $tentsModalStatus = document.getElementById("tentsModalStatus");
 const $testMode = document.getElementById("testMode");
+const $carsView = document.getElementById("carsView");
+const $chartView = document.getElementById("chartView");
+const $priceView = document.getElementById("priceView");
+const $sheetTabs = document.getElementById("sheetTabs");
+const $openCarsView = document.getElementById("openCarsView");
+const $openPriceForm = document.getElementById("openPriceForm");
+const $openFinalForm = document.getElementById("openFinalForm");
+const $openChartView = document.getElementById("openChartView");
+const $backToCars = document.getElementById("backToCars");
+const $carsStatus = document.getElementById("carsStatus");
+const $carsCount = document.getElementById("carsCount");
+const $carsTableBody = document.getElementById("carsTableBody");
+const $chartDateSelect = document.getElementById("chartDateSelect");
+const $chartStatus = document.getElementById("chartStatus");
+const $chartSummary = document.getElementById("chartSummary");
+const $chartBranches = document.getElementById("chartBranches");
+const $finalNoteRow = document.getElementById("finalNoteRow");
+const $finalNote = document.getElementById("finalNote");
+const $finalModal = document.getElementById("finalModal");
+const $closeFinalModal = document.getElementById("closeFinalModal");
+const $cancelFinalWindow = document.getElementById("cancelFinalWindow");
+const $saveFinalWindow = document.getElementById("saveFinalWindow");
+const $deleteFinalWindow = document.getElementById("deleteFinalWindow");
+const $finalModalStatus = document.getElementById("finalModalStatus");
+const $finalCarSummary = document.getElementById("finalCarSummary");
+const $finalDate = document.getElementById("finalDate");
+const $finalStartTime = document.getElementById("finalStartTime");
+const $finalEndTime = document.getElementById("finalEndTime");
+
+let currentFormMode = "normal";
+let biddingCarsCache = [];
+let activeFinalCars = [];
+let selectedFinalCarForModal = null;
+let remainingTimer = null;
+let carsRefreshTimer = null;
+let cellPopoverTimer = null;
 
 function createDropdown({ triggerEl, menuEl, placeholder, searchInputEl, optionsContainerEl }) {
   const container = triggerEl.closest(".dropdown");
@@ -497,11 +533,628 @@ function createEl(tag, attrs) {
     for (const [key, value] of Object.entries(attrs)) {
       if (key === "className") el.className = value;
       else if (key === "text") el.textContent = value;
-      else if (key.startsWith("on") && typeof value === "function") el.addEventListener(key.slice(2), value);
+      else if (key.startsWith("on") && typeof value === "function") el.addEventListener(key.slice(2).toLowerCase(), value);
       else el.setAttribute(key, value);
     }
   }
   return el;
+}
+
+function showView(viewName) {
+  const isPrice = viewName === "price";
+  const isChart = viewName === "chart";
+  const isCars = viewName === "cars";
+  $carsView.hidden = isPrice;
+  $chartView.hidden = !isChart;
+  $carsView.hidden = isPrice || isChart;
+  $priceView.hidden = !isPrice;
+  $openCarsView.classList.toggle("active", isCars);
+  $openChartView.classList.toggle("active", isChart);
+  $sheetTabs.classList.toggle("chart-active", isChart);
+  $openCarsView.setAttribute("aria-selected", String(isCars));
+  $openChartView.setAttribute("aria-selected", String(isChart));
+  document.title = isPrice ? "บันทึกราคา" : isChart ? "ชาทราคา" : "รายการรถ";
+}
+
+function setFormMode(mode) {
+  currentFormMode = mode === "final" ? "final" : "normal";
+  const isFinal = currentFormMode === "final";
+  document.getElementById("priceTitle").textContent = isFinal ? "บันทึกราคา Final" : "บันทึกราคา";
+  $submit.textContent = isFinal ? "บันทึก Final" : "บันทึก";
+  $finalNoteRow.hidden = !isFinal;
+  if (!isFinal) $finalNote.value = "";
+}
+
+function navigateTo(viewName) {
+  window.location.hash = viewName === "price" ? "price" : viewName === "chart" ? "chart" : "cars";
+  showView(viewName);
+}
+
+function syncViewFromHash() {
+  const viewName = window.location.hash === "#price" ? "price" : window.location.hash === "#chart" ? "chart" : "cars";
+  showView(viewName);
+  if (viewName === "cars") refreshBiddingCarsSilently();
+}
+
+function setCarsStatus(text, type) {
+  $carsStatus.classList.remove("error");
+  if (type) $carsStatus.classList.add(type);
+  $carsStatus.textContent = text || "";
+}
+
+function displayValue(value) {
+  const text = String(value || "").trim();
+  return text || "-";
+}
+
+function normalizeNumberText(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const normalized = text.replace(/,/g, "");
+  const number = Number(normalized);
+  if (!Number.isFinite(number)) return text;
+  return number.toLocaleString("th-TH");
+}
+
+function parseNumber(value) {
+  const number = Number(String(value || "").trim().replace(/,/g, ""));
+  return Number.isFinite(number) ? number : null;
+}
+
+function isGoodDsPrice(car) {
+  const expected = parseNumber(car.expectedPrice);
+  const dsMax = parseNumber(car.dsMaxPrice);
+  if (expected == null || expected <= 0 || dsMax == null) return false;
+  return dsMax >= expected - 50000;
+}
+
+function hasPriceValue(value, options = {}) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  const number = parseNumber(text);
+  if (number == null) return false;
+  if (options.zeroAsEmpty && number === 0) return false;
+  return true;
+}
+
+function formatPriceValue(value, options = {}) {
+  if (!hasPriceValue(value, options)) return "-";
+  return normalizeNumberText(value);
+}
+
+function parseServiceDate(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!match) return null;
+  return {
+    day: Number(match[1]),
+    month: Number(match[2]),
+    year: Number(match[3])
+  };
+}
+
+function isTodayServiceDate(value) {
+  const parsed = parseServiceDate(value);
+  if (!parsed) return false;
+  const now = new Date();
+  return parsed.day === now.getDate() && parsed.month === now.getMonth() + 1 && parsed.year === now.getFullYear();
+}
+
+function getPriceCellClass(baseClass, value, options = {}) {
+  return [baseClass, hasPriceValue(value, options) ? "" : "price-empty"].filter(Boolean).join(" ");
+}
+
+function getBranchClass(branchName) {
+  const text = String(branchName || "").trim();
+  if (text.includes("บางนา")) return "branch-bangna";
+  if (text.includes("สะพานควาย")) return "branch-saphan";
+  return "";
+}
+
+function appendCell(row, value, className) {
+  const cell = createEl("td", { text: displayValue(value) });
+  if (className) cell.className = className;
+  cell.dataset.fullText = displayValue(value);
+  row.appendChild(cell);
+}
+
+function getFinalState(final) {
+  if (!final || !final.startIso || !final.endIso) return "empty";
+  const now = Date.now();
+  const start = Date.parse(final.startIso);
+  const end = Date.parse(final.endIso);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return "set";
+  if (now >= start && now <= end) return "active";
+  if (now > end) return "ended";
+  return "set";
+}
+
+function formatFinalDateForList(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return text || "-";
+  return `${match[3]}/${match[2]}/${match[1]}`;
+}
+
+function formatFinalWindowText(final) {
+  if (!final || !final.finalDate || !final.startTime || !final.endTime) return "-";
+  return `${formatFinalDateForList(final.finalDate)};${final.startTime}-${final.endTime}`;
+}
+
+function formatRemainingMs(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return "-";
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${pad2(hours)}:${pad2(minutes)}:${pad2(seconds)}`;
+  return `${pad2(minutes)}:${pad2(seconds)}`;
+}
+
+function getRemainingText(final) {
+  const state = getFinalState(final);
+  if (state === "ended") return "✓";
+  if (state !== "active") return "-";
+  return formatRemainingMs(Date.parse(final.endIso) - Date.now());
+}
+
+function calendarIconSvg() {
+  return `
+    <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M8 2v4"></path>
+      <path d="M16 2v4"></path>
+      <rect x="3" y="4" width="18" height="18" rx="2"></rect>
+      <path d="M3 10h18"></path>
+    </svg>
+  `;
+}
+
+function appendFinalCell(row, car) {
+  const cell = createEl("td", { className: "final-cell" });
+  const state = getFinalState(car.final);
+  const button = createEl("button", {
+    className: `calendar-button final-${state === "empty" ? "empty" : state}`,
+    type: "button",
+    "aria-label": `ตั้งเวลา Final ${car.plate || ""}`,
+    title: car.final ? `${car.final.finalDate || ""} ${car.final.startTime || ""}-${car.final.endTime || ""}` : "ตั้งเวลา Final",
+    onClick: () => openFinalModal(car)
+  });
+  button.innerHTML = calendarIconSvg();
+  cell.appendChild(button);
+  row.appendChild(cell);
+}
+
+function appendFinalWindowCells(row, car) {
+  appendCell(row, formatFinalWindowText(car.final), "final-window-cell");
+  const remaining = createEl("td", { className: "remaining-cell center-cell", text: getRemainingText(car.final) });
+  if (car.final?.endIso) remaining.dataset.endIso = car.final.endIso;
+  if (car.final?.startIso) remaining.dataset.startIso = car.final.startIso;
+  row.appendChild(remaining);
+}
+
+function setRemainingCellState(cell, ms, active) {
+  cell.classList.remove("final-active", "final-warning", "final-danger", "final-done");
+  if (!active) return;
+  if (ms < 5 * 60 * 1000) {
+    cell.classList.add("final-danger");
+  } else {
+    cell.classList.add("final-active");
+  }
+}
+
+function updateRemainingCells() {
+  const cells = document.querySelectorAll(".remaining-cell[data-start-iso][data-end-iso]");
+  for (const cell of cells) {
+    const start = Date.parse(cell.dataset.startIso || "");
+    const end = Date.parse(cell.dataset.endIso || "");
+    const now = Date.now();
+    const active = Number.isFinite(start) && Number.isFinite(end) && now >= start && now <= end;
+    const ended = Number.isFinite(end) && now > end;
+    const remainingMs = end - now;
+    cell.textContent = active ? formatRemainingMs(remainingMs) : ended ? "✓" : "-";
+    setRemainingCellState(cell, remainingMs, active);
+    cell.classList.toggle("final-done", ended);
+  }
+}
+
+function renderCars(cars) {
+  $carsTableBody.innerHTML = "";
+  const list = Array.isArray(cars) ? cars : [];
+  biddingCarsCache = list;
+  if ($carsCount) $carsCount.textContent = `${list.length.toLocaleString("th-TH")} รายการ`;
+
+  if (list.length === 0) {
+    const row = createEl("tr");
+    const cell = createEl("td", { className: "empty-state", text: "ไม่มีรายการรถ" });
+    cell.colSpan = 18;
+    row.appendChild(cell);
+    $carsTableBody.appendChild(row);
+    return;
+  }
+
+  for (const car of list) {
+    const row = createEl("tr");
+    appendCell(row, car.serviceDate, ["primary-cell center-cell", isTodayServiceDate(car.serviceDate) ? "today-service-cell" : ""].filter(Boolean).join(" "));
+    appendCell(row, car.branch, ["primary-cell", getBranchClass(car.branch)].filter(Boolean).join(" "));
+    appendCell(row, car.location, "center-cell");
+    appendCell(row, car.plate, "primary-cell");
+    appendCell(row, car.brand);
+    appendCell(row, car.model);
+    appendCell(row, car.subModel);
+    appendCell(row, car.year, "muted-cell center-cell");
+    appendCell(row, normalizeNumberText(car.mileage), "muted-cell");
+    appendCell(row, car.fuel);
+    appendCell(row, car.condition, "center-cell");
+    const goodPriceClass = isGoodDsPrice(car) ? " good-price" : "";
+    appendCell(row, formatPriceValue(car.expectedPrice, { zeroAsEmpty: true }), getPriceCellClass(`price-cell expected-price-cell${goodPriceClass}`, car.expectedPrice, { zeroAsEmpty: true }));
+    appendCell(row, formatPriceValue(car.dsMaxPrice), getPriceCellClass(`price-cell${goodPriceClass}`, car.dsMaxPrice));
+    appendCell(row, formatPriceValue(car.finalMaxPrice), getPriceCellClass("price-cell final-max-price-cell", car.finalMaxPrice));
+    appendCell(row, car.remark);
+    appendFinalCell(row, car);
+    appendFinalWindowCells(row, car);
+    $carsTableBody.appendChild(row);
+  }
+  updateRemainingCells();
+  if (!remainingTimer) remainingTimer = setInterval(updateRemainingCells, 1000);
+}
+
+async function loadBiddingCars() {
+  setCarsStatus("กำลังโหลดรายการรถ...");
+  try {
+    const { cars } = await fetchJson("/api/bidding-cars?limit=50");
+    renderCars(cars);
+    setCarsStatus("");
+  } catch (error) {
+    renderCars([]);
+    setCarsStatus(`โหลดรายการรถไม่สำเร็จ: ${String(error.message || error)}`, "error");
+  }
+}
+
+async function refreshBiddingCarsSilently() {
+  if (document.hidden || window.location.hash === "#price" || window.location.hash === "#chart") return;
+  try {
+    const { cars } = await fetchJson("/api/bidding-cars?limit=50");
+    renderCars(cars);
+    setCarsStatus("");
+  } catch (error) {
+    setCarsStatus(`อัปเดทรายการรถไม่สำเร็จ: ${String(error.message || error)}`, "error");
+  }
+}
+
+function startCarsAutoRefresh() {
+  if (carsRefreshTimer) return;
+  carsRefreshTimer = setInterval(refreshBiddingCarsSilently, 30000);
+}
+
+function setButtonLoading(button, loading) {
+  if (!button) return;
+  button.classList.toggle("loading", loading);
+  button.setAttribute("aria-busy", String(loading));
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && window.location.hash !== "#price" && window.location.hash !== "#chart") refreshBiddingCarsSilently();
+});
+
+function getCellPopover() {
+  let popover = document.querySelector(".cell-popover");
+  if (!popover) {
+    popover = createEl("div", { className: "cell-popover", role: "tooltip" });
+    document.body.appendChild(popover);
+  }
+  return popover;
+}
+
+function hideCellPopover() {
+  const popover = document.querySelector(".cell-popover");
+  if (popover) popover.classList.remove("open");
+}
+
+function showCellPopover(cell, event) {
+  const text = String(cell.dataset.fullText || cell.textContent || "").trim();
+  if (!text || text === "-") return;
+  const popover = getCellPopover();
+  popover.textContent = text;
+  popover.classList.add("open");
+  const margin = 12;
+  const rect = popover.getBoundingClientRect();
+  const left = Math.min(event.clientX + margin, window.innerWidth - rect.width - margin);
+  const top = Math.min(event.clientY + margin, window.innerHeight - rect.height - margin);
+  popover.style.left = `${Math.max(margin, left)}px`;
+  popover.style.top = `${Math.max(margin, top)}px`;
+  clearTimeout(cellPopoverTimer);
+  cellPopoverTimer = setTimeout(hideCellPopover, 3600);
+}
+
+function setChartStatus(text, type) {
+  $chartStatus.classList.remove("error", "ok");
+  if (type) $chartStatus.classList.add(type);
+  $chartStatus.textContent = text || "";
+}
+
+function extractTimeText(timestamp) {
+  const text = String(timestamp || "").trim();
+  const match = text.match(/\b(\d{1,2}):(\d{2})(?::\d{2})?\b/);
+  if (!match) return "";
+  return `${pad2(match[1])}:${match[2]}`;
+}
+
+function renderChartDateOptions(dates) {
+  $chartDateSelect.innerHTML = "";
+  for (const date of dates || []) {
+    const option = createEl("option", { value: date, text: date });
+    $chartDateSelect.appendChild(option);
+  }
+}
+
+function renderChartSummary(totals) {
+  const items = [
+    ["รถทั้งหมด", totals?.cars || 0],
+    ["ราคาปกติ", totals?.bids || 0],
+    ["ราคา Final", totals?.finalBids || 0]
+  ];
+  $chartSummary.innerHTML = "";
+  for (const [label, value] of items) {
+    const tile = createEl("div", { className: "summary-tile" });
+    tile.appendChild(createEl("div", { className: "summary-label", text: label }));
+    tile.appendChild(createEl("div", { className: "summary-value", text: Number(value).toLocaleString("th-TH") }));
+    $chartSummary.appendChild(tile);
+  }
+}
+
+function renderBidLine(bid, options) {
+  const line = createEl("div", { className: `bid-line${options?.isFinal ? " final-bid" : ""}` });
+  line.appendChild(createEl("div", { className: "bid-tent", text: displayValue(bid.tentName) }));
+  line.appendChild(createEl("div", { className: "bid-price", text: normalizeNumberText(bid.price) }));
+  line.appendChild(createEl("div", { className: "bid-time", text: extractTimeText(bid.timestamp) || "-" }));
+  line.appendChild(createEl("div", { className: "bid-status", text: displayValue(bid.status) }));
+  return line;
+}
+
+function renderChartDashboard(dashboard) {
+  renderChartSummary(dashboard?.totals || {});
+  $chartBranches.innerHTML = "";
+  const branches = dashboard?.branches || [];
+  if (branches.length === 0) {
+    $chartBranches.appendChild(createEl("div", { className: "chart-empty", text: "ไม่มีข้อมูลสำหรับวันที่นี้" }));
+    return;
+  }
+
+  for (const branch of branches) {
+    const panel = createEl("section", { className: "branch-panel" });
+    const branchClass = getBranchClass(branch.branch);
+    const header = createEl("div", { className: ["branch-header", branchClass].filter(Boolean).join(" ") });
+    header.appendChild(createEl("div", { className: "branch-title", text: branch.branch || "ไม่ระบุสาขา" }));
+    header.appendChild(createEl("div", { className: "branch-count", text: `${(branch.cars || []).length} คัน` }));
+    panel.appendChild(header);
+
+    for (let index = 0; index < (branch.cars || []).length; index += 1) {
+      const car = branch.cars[index];
+      const carCard = createEl("article", { className: "chart-car" });
+      const title = createEl("div", { className: "chart-car-title" });
+      const meta = [
+        car.mileage ? `ไมล์ ${normalizeNumberText(car.mileage)}` : "",
+        car.expectedPrice ? `คาดหวัง ${normalizeNumberText(car.expectedPrice)}` : "",
+        car.maxFinalPrice ? `Final ${normalizeNumberText(car.maxFinalPrice)}` : ""
+      ].filter(Boolean);
+      const mainLine = createEl("div", { className: "chart-car-main" });
+      mainLine.appendChild(document.createTextNode(`${index + 1}. ${displayValue(car.plate)} : ${displayValue(car.model)}`));
+      if (meta.length > 0) {
+        mainLine.appendChild(createEl("span", { className: "chart-car-inline-meta", text: ` · ${meta.join(" · ")}` }));
+      }
+      title.appendChild(mainLine);
+      carCard.appendChild(title);
+
+      const layout = createEl("div", { className: "chart-bid-layout" });
+      const countBox = createEl("div", { className: "bid-count-box" });
+      countBox.appendChild(createEl("div", { className: "bid-count-label", text: "ผู้ใส่ราคา" }));
+      countBox.appendChild(createEl("div", { className: "bid-count-value", text: String(car.bidCount || 0) }));
+      layout.appendChild(countBox);
+
+      const bidList = createEl("div", { className: "bid-list" });
+      const bids = [...(car.regularBids || [])].sort((a, b) => Number(b.price || 0) - Number(a.price || 0));
+      const finalBids = [...(car.finalBids || [])].sort((a, b) => Number(b.price || 0) - Number(a.price || 0));
+      if (bids.length === 0 && finalBids.length === 0) {
+        bidList.appendChild(createEl("div", { className: "bid-line", text: "ยังไม่มีราคา" }));
+      } else {
+        for (const bid of bids) bidList.appendChild(renderBidLine(bid));
+        for (const bid of finalBids) bidList.appendChild(renderBidLine(bid, { isFinal: true }));
+      }
+      layout.appendChild(bidList);
+      carCard.appendChild(layout);
+      panel.appendChild(carCard);
+    }
+    $chartBranches.appendChild(panel);
+  }
+}
+
+async function loadChartDates() {
+  const { dates } = await fetchJson("/api/dates");
+  renderChartDateOptions(dates);
+  return dates || [];
+}
+
+async function loadPriceChart(date) {
+  const selectedDate = String(date || $chartDateSelect.value || "").trim();
+  if (!selectedDate) return;
+  setChartStatus("กำลังโหลดชาทราคา...");
+  try {
+    const { dashboard } = await fetchJson(`/api/price-dashboard?date=${encodeURIComponent(selectedDate)}`);
+    renderChartDashboard(dashboard);
+    setChartStatus("");
+  } catch (error) {
+    $chartSummary.innerHTML = "";
+    $chartBranches.innerHTML = "";
+    setChartStatus(`โหลดชาทราคาไม่สำเร็จ: ${String(error.message || error)}`, "error");
+  }
+}
+
+async function openChartView() {
+  navigateTo("chart");
+  try {
+    if ($chartDateSelect.options.length === 0) {
+      const dates = await loadChartDates();
+      if (dates.length > 0) $chartDateSelect.value = dates[0];
+    }
+    await loadPriceChart($chartDateSelect.value);
+  } catch (error) {
+    setChartStatus(`โหลดวันที่ไม่สำเร็จ: ${String(error.message || error)}`, "error");
+  }
+}
+
+function pad2(number) {
+  return String(number).padStart(2, "0");
+}
+
+function formatDateInput(date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+function formatTimeInput(date) {
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+function addMinutesToTime(dateValue, timeValue, minutes) {
+  const [hour, minute] = String(timeValue || "00:00").split(":").map((v) => Number(v));
+  const date = dateValue ? new Date(`${dateValue}T00:00:00`) : new Date();
+  date.setHours(Number.isFinite(hour) ? hour : 0, Number.isFinite(minute) ? minute : 0, 0, 0);
+  date.setMinutes(date.getMinutes() + minutes);
+  return formatTimeInput(date);
+}
+
+function setFinalModalStatus(text, type) {
+  $finalModalStatus.classList.remove("error", "ok");
+  if (type) $finalModalStatus.classList.add(type);
+  $finalModalStatus.textContent = text || "";
+}
+
+function openFinalModal(car) {
+  selectedFinalCarForModal = car;
+  $finalModal.classList.add("open");
+  $finalModal.setAttribute("aria-hidden", "false");
+  setFinalModalStatus("");
+  const model = [car.brand, car.model, car.subModel, car.year].filter(Boolean).join(" ");
+  $finalCarSummary.innerHTML = `<strong>${displayValue(car.plate)}</strong> ${displayValue(model)}<br>${displayValue(car.branch)} · ${displayValue(car.serviceDate)}`;
+
+  const now = new Date();
+  $finalDate.value = car.final?.finalDate || formatDateInput(now);
+  $finalStartTime.value = car.final?.startTime || formatTimeInput(now);
+  $finalEndTime.value = car.final?.endTime || addMinutesToTime($finalDate.value, $finalStartTime.value, 30);
+  $deleteFinalWindow.disabled = !car.final;
+}
+
+function closeFinalModal() {
+  $finalModal.classList.remove("open");
+  $finalModal.setAttribute("aria-hidden", "true");
+  selectedFinalCarForModal = null;
+}
+
+async function saveFinalWindow() {
+  if (!selectedFinalCarForModal) return;
+  $saveFinalWindow.disabled = true;
+  setButtonLoading($saveFinalWindow, true);
+  setFinalModalStatus("กำลังบันทึกเวลา Final...");
+  try {
+    await fetchJsonWithOptions("/api/final-windows", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        car: selectedFinalCarForModal,
+        finalDate: $finalDate.value,
+        startTime: $finalStartTime.value,
+        endTime: $finalEndTime.value,
+        testMode: Boolean($testMode && $testMode.checked)
+      })
+    });
+    setFinalModalStatus("บันทึกเวลา Final สำเร็จ", "ok");
+    await loadBiddingCars();
+    setTimeout(closeFinalModal, 400);
+  } catch (error) {
+    setFinalModalStatus(`บันทึกไม่สำเร็จ: ${String(error.message || error)}`, "error");
+  } finally {
+    setButtonLoading($saveFinalWindow, false);
+    $saveFinalWindow.disabled = false;
+  }
+}
+
+async function deleteFinalWindow() {
+  if (!selectedFinalCarForModal || !selectedFinalCarForModal.final) return;
+  $deleteFinalWindow.disabled = true;
+  $saveFinalWindow.disabled = true;
+  setButtonLoading($deleteFinalWindow, true);
+  setFinalModalStatus("กำลังยกเลิกการเปิดไฟนอล...");
+  try {
+    await fetchJsonWithOptions(
+      `/api/final-windows?date=${encodeURIComponent(selectedFinalCarForModal.serviceDate)}&plate=${encodeURIComponent(selectedFinalCarForModal.plate)}`,
+      { method: "DELETE" }
+    );
+    setFinalModalStatus("ยกเลิกการเปิดไฟนอลสำเร็จ", "ok");
+    await loadBiddingCars();
+    setTimeout(closeFinalModal, 400);
+  } catch (error) {
+    setFinalModalStatus(`ยกเลิกไม่สำเร็จ: ${String(error.message || error)}`, "error");
+    $deleteFinalWindow.disabled = false;
+  } finally {
+    setButtonLoading($deleteFinalWindow, false);
+    $saveFinalWindow.disabled = false;
+  }
+}
+
+async function loadActiveFinalCars() {
+  const { cars } = await fetchJson("/api/final-cars");
+  activeFinalCars = Array.isArray(cars) ? cars : [];
+  return activeFinalCars;
+}
+
+function getActiveFinalPlatesByDate(date) {
+  return activeFinalCars
+    .filter((car) => car.serviceDate === date)
+    .map((car) => car.plate)
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, "th-TH"));
+}
+
+function findActiveFinalCar({ date, plate }) {
+  return activeFinalCars.find((car) => car.serviceDate === date && car.plate === plate) || null;
+}
+
+async function openFinalFormWithCar(car) {
+  setFormMode("final");
+  resetForm({ keepTestMode: true });
+  setStatus("กำลังโหลดรายการ Final...");
+  try {
+    await loadActiveFinalCars();
+    const dates = Array.from(new Set(activeFinalCars.map((item) => item.serviceDate).filter(Boolean)));
+    serviceDateDropdown.setOptions(dates);
+    serviceDateDropdown.setDisabled(false);
+    if (car) {
+      serviceDateDropdown.setValue(car.serviceDate);
+      plateDropdown.setOptions(getActiveFinalPlatesByDate(car.serviceDate));
+      plateDropdown.setDisabled(false);
+      plateDropdown.setValue(car.plate);
+      $branch.value = car.branch || "";
+      $model.value = [car.brand, car.model, car.subModel, car.year].filter(Boolean).join(" ");
+    } else if (activeFinalCars.length === 1) {
+      const only = activeFinalCars[0];
+      serviceDateDropdown.setValue(only.serviceDate);
+      plateDropdown.setOptions(getActiveFinalPlatesByDate(only.serviceDate));
+      plateDropdown.setDisabled(false);
+      plateDropdown.setValue(only.plate);
+      $branch.value = only.branch || "";
+      $model.value = [only.brand, only.model, only.subModel, only.year].filter(Boolean).join(" ");
+    } else {
+      serviceDateDropdown.clear();
+      plateDropdown.setOptions([]);
+      plateDropdown.clear();
+      plateDropdown.setDisabled(true);
+    }
+    setStatus(activeFinalCars.length ? "" : "ยังไม่มีรถที่อยู่ในช่วงเวลา Final", activeFinalCars.length ? undefined : "error");
+    maybeEnableSubmit();
+    navigateTo("price");
+  } catch (error) {
+    setStatus(`โหลดรายการ Final ไม่สำเร็จ: ${String(error.message || error)}`, "error");
+    navigateTo("price");
+  }
 }
 
 function renderTentsTable(tents) {
@@ -598,6 +1251,7 @@ async function loadTentsIntoDropdown() {
 }
 
 async function loadDates() {
+  if (currentFormMode === "final") return;
   setStatus("กำลังโหลดวันที่...");
   serviceDateDropdown.setDisabled(true);
   plateDropdown.setDisabled(true);
@@ -624,6 +1278,15 @@ async function loadPlatesForDate(date) {
     return;
   }
 
+  if (currentFormMode === "final") {
+    const plates = getActiveFinalPlatesByDate(date);
+    plateDropdown.setOptions(plates);
+    plateDropdown.clear();
+    plateDropdown.setDisabled(plates.length === 0);
+    setStatus(plates.length ? "" : "ไม่มีทะเบียนที่อยู่ในช่วงเวลา Final สำหรับวันที่นี้", plates.length ? undefined : "error");
+    return;
+  }
+
   setStatus("กำลังโหลดทะเบียน...");
   try {
     const { plates } = await fetchJson(`/api/plates?date=${encodeURIComponent(date)}`);
@@ -641,6 +1304,19 @@ async function loadCaseDetail({ date, plate }) {
   $model.value = "";
   $submit.disabled = true;
   if (!date || !plate) return;
+
+  if (currentFormMode === "final") {
+    const car = findActiveFinalCar({ date, plate });
+    if (!car) {
+      setStatus("ทะเบียนนี้ไม่ได้อยู่ในช่วงเวลา Final", "error");
+      return;
+    }
+    $branch.value = car.branch || "";
+    $model.value = [car.brand, car.model, car.subModel, car.year].filter(Boolean).join(" ");
+    setStatus("");
+    maybeEnableSubmit();
+    return;
+  }
 
   setStatus("กำลังโหลดรายละเอียดเคส...");
   try {
@@ -663,7 +1339,8 @@ function maybeEnableSubmit() {
   const tentName = tentNameDropdown.getValue();
   const dealStatus = dealStatusDropdown.getValue();
   const hasCase = Boolean($branch.value || $model.value);
-  $submit.disabled = !(date && plate && price && tentName && dealStatus && hasCase);
+  const hasFinalNote = currentFormMode !== "final" || Boolean(String($finalNote.value || "").trim());
+  $submit.disabled = !(date && plate && price && tentName && dealStatus && hasCase && hasFinalNote);
 }
 
 function resetForm(options) {
@@ -679,6 +1356,7 @@ function resetForm(options) {
   $branch.value = "";
   $model.value = "";
   $price.value = "";
+  $finalNote.value = "";
   tentNameDropdown.clear();
   dealStatusDropdown.clear();
   if (!keepTestMode && $testMode) $testMode.checked = false;
@@ -694,6 +1372,7 @@ async function submitForm() {
     price: $price.value,
     tentName: tentNameDropdown.getValue(),
     status: dealStatusDropdown.getValue(),
+    note: String($finalNote.value || "").trim(),
     testMode: Boolean($testMode && $testMode.checked)
   };
 
@@ -701,7 +1380,7 @@ async function submitForm() {
   $submit.disabled = true;
 
   try {
-    const response = await fetch("/api/submit", {
+    const response = await fetch(currentFormMode === "final" ? "/api/submit-final" : "/api/submit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
@@ -709,8 +1388,10 @@ async function submitForm() {
     const json = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(json.error || `HTTP ${response.status}`);
 
-    setStatus("บันทึกสำเร็จ", "ok");
+    setStatus(currentFormMode === "final" ? "บันทึก Final สำเร็จ" : "บันทึกสำเร็จ", "ok");
     resetForm({ keepStatus: true, keepTestMode: true });
+    if (currentFormMode === "final") await loadActiveFinalCars();
+    await loadBiddingCars();
   } catch (error) {
     setStatus(`บันทึกไม่สำเร็จ: ${String(error.message || error)}`, "error");
   } finally {
@@ -752,9 +1433,44 @@ $price.addEventListener("input", () => {
 
 $tentName.addEventListener("change", maybeEnableSubmit);
 $dealStatus.addEventListener("change", maybeEnableSubmit);
+$finalNote.addEventListener("input", maybeEnableSubmit);
 $reset.addEventListener("click", resetForm);
 $submit.addEventListener("click", submitForm);
 $manageTents.addEventListener("click", openTentsModal);
+$openCarsView.addEventListener("click", () => navigateTo("cars"));
+$openPriceForm.addEventListener("click", async () => {
+  setFormMode("normal");
+  resetForm({ keepTestMode: true });
+  await loadDates();
+  navigateTo("price");
+});
+$openChartView.addEventListener("click", openChartView);
+$chartDateSelect.addEventListener("change", () => loadPriceChart($chartDateSelect.value));
+$openFinalForm.addEventListener("click", () => openFinalFormWithCar(null));
+$backToCars.addEventListener("click", () => navigateTo("cars"));
+window.addEventListener("hashchange", syncViewFromHash);
+$carsTableBody.addEventListener("click", (event) => {
+  if (event.target.closest("button")) return;
+  const cell = event.target.closest("td");
+  if (!cell || !$carsTableBody.contains(cell)) return;
+  showCellPopover(cell, event);
+});
+document.addEventListener("click", (event) => {
+  if (event.target.closest(".cars-table td")) return;
+  hideCellPopover();
+});
+window.addEventListener("scroll", hideCellPopover, true);
+$finalStartTime.addEventListener("change", () => {
+  $finalEndTime.value = addMinutesToTime($finalDate.value, $finalStartTime.value, 30);
+});
+$closeFinalModal.addEventListener("click", closeFinalModal);
+$cancelFinalWindow.addEventListener("click", closeFinalModal);
+$saveFinalWindow.addEventListener("click", saveFinalWindow);
+$deleteFinalWindow.addEventListener("click", deleteFinalWindow);
+$finalModal.addEventListener("click", (e) => {
+  const isBackdrop = e.target && e.target.getAttribute && e.target.getAttribute("data-close") === "true";
+  if (isBackdrop) closeFinalModal();
+});
 $closeTentsModal.addEventListener("click", closeTentsModal);
 $tentsModal.addEventListener("click", (e) => {
   const isBackdrop = e.target && e.target.getAttribute && e.target.getAttribute("data-close") === "true";
@@ -762,6 +1478,7 @@ $tentsModal.addEventListener("click", (e) => {
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && $tentsModal.classList.contains("open")) closeTentsModal();
+  if (e.key === "Escape" && $finalModal.classList.contains("open")) closeFinalModal();
 });
 
 $addTent.addEventListener("click", async () => {
@@ -798,3 +1515,7 @@ $newTentName.addEventListener("keydown", (e) => {
 initTents();
 initDealStatus();
 loadDates();
+syncViewFromHash();
+loadBiddingCars();
+startCarsAutoRefresh();
+if (window.location.hash === "#chart") openChartView();

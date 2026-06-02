@@ -197,6 +197,25 @@ function formatNumberWithCommas(value) {
   return new Intl.NumberFormat("th-TH").format(num);
 }
 
+function parseBangkokTimestampMs(timestamp) {
+  const text = String(timestamp || "").trim();
+  const dmyMatch = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}),\s*(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (dmyMatch) {
+    const day = dmyMatch[1].padStart(2, "0");
+    const month = dmyMatch[2].padStart(2, "0");
+    const year = dmyMatch[3];
+    const hour = dmyMatch[4].padStart(2, "0");
+    const minute = dmyMatch[5];
+    const second = dmyMatch[6] || "00";
+    return Date.parse(`${year}-${month}-${day}T${hour}:${minute}:${second}+07:00`);
+  }
+  const ymdMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (ymdMatch) {
+    return Date.parse(`${ymdMatch[1]}-${ymdMatch[2]}-${ymdMatch[3]}T${ymdMatch[4]}:${ymdMatch[5]}:${ymdMatch[6] || "00"}+07:00`);
+  }
+  return NaN;
+}
+
 function buildBranchDayLineMessage({ branch, date, cars }) {
   const header = `${getBranchAbbrev(branch)}${formatServiceDateForHeader(date)}`;
   const lines = [header];
@@ -304,4 +323,61 @@ function buildBranchDayLineMessage({ branch, date, cars }) {
   return lines.join("\n");
 }
 
-module.exports = { buildBranchDayLineMessage };
+function buildFinalSummaryLineMessage({ finalWindow, bids }) {
+  const car = finalWindow || {};
+  const branch = String(car.branch || "").replace(/^\d+\s*/, "").trim();
+  const date = formatServiceDateForHeader(car.serviceDate);
+  const finalDateText = String(car.finalDate || "").trim();
+  const openDate = finalDateText
+    ? finalDateText.replace(/^(\d{4})-(\d{2})-(\d{2})$/, "$3/$2/$1")
+    : date;
+  const startTime = String(car.startTime || "").replace(":", ".");
+  const endTime = String(car.endTime || "").replace(":", ".");
+
+  const lines = [
+    `🚨 FINAL จบดันราคาสุดท้าย    สาขา : ${branch}  ${date}  เปิดเวลา : ${startTime}-${endTime} 🚨`,
+    ""
+  ];
+
+  const model = [car.brand, car.model, car.subModel, car.year].filter(Boolean).join(" ");
+  const extraInfo = [];
+  if (car.mileage) extraInfo.push(`เลขไมล์ : ${formatNumberWithCommas(car.mileage)}`);
+  if (car.expectedPrice) extraInfo.push(`คาดหวัง : ${formatNumberWithCommas(car.expectedPrice)}`);
+  const extraStr = extraInfo.length > 0 ? ` ${extraInfo.join(" ")}` : "";
+  lines.push(`${[model, car.plate].filter(Boolean).join(" ")}${extraStr}`.trim());
+  if (car.remark) lines.push(car.remark);
+
+  const collapsed = collapseBidsByTent(bids || []);
+  collapsed.sort((a, b) => {
+    const pa = Number(a.price) || 0;
+    const pb = Number(b.price) || 0;
+    if (pb !== pa) return pb - pa;
+    return compareTimestamp(a.timestamp, b.timestamp);
+  });
+
+  if (collapsed.length > 0) {
+    const emoji = pickFoodEmoji(`${car.branch}||${car.serviceDate}||${car.plate}||final`);
+    lines.push(`${emoji}${emoji}`);
+    const startMs = Date.parse(car.startIso);
+    const endMs = Date.parse(car.endIso);
+    for (const bid of collapsed) {
+      const time = extractTime(bid.timestamp);
+      const bidMs = parseBangkokTimestampMs(bid.timestamp);
+      const outsideFinal =
+        Number.isFinite(startMs) &&
+        Number.isFinite(endMs) &&
+        Number.isFinite(bidMs) &&
+        (bidMs < startMs || bidMs > endMs);
+      const movedSuffix = bid.moved ? " *ขยับราคา" : "";
+      const outsideSuffix = outsideFinal ? " *นอกเวลา" : "";
+      lines.push(
+        `${shortenTentName(bid.tentName)} ${formatPrice(bid.price)} ${[time, bid.status].filter(Boolean).join(" ")}${movedSuffix}${outsideSuffix}`.trim()
+      );
+    }
+    lines.push(`${emoji}${emoji}`);
+  }
+
+  return lines.join("\n");
+}
+
+module.exports = { buildBranchDayLineMessage, buildFinalSummaryLineMessage };

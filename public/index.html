@@ -3,14 +3,112 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>บันทึกราคา</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <title>รายการรถ</title>
+    <link rel="stylesheet" href="/styles.css?v=list-ui-1" />
   </head>
   <body>
-    <main class="container">
-      <h1>บันทึกราคา</h1>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="brand-stack">
+          <a class="brand" href="#cars" aria-label="JUST CAR">
+            <img class="brand-logo" src="/company-logo.png" alt="JUST CAR" />
+          </a>
+          <div id="sheetTabs" class="sheet-tabs" role="tablist" aria-label="สลับหน้า">
+            <button id="openCarsView" class="sheet-tab active" type="button" role="tab" aria-selected="true">รายการ</button>
+            <button id="openChartView" class="sheet-tab" type="button" role="tab" aria-selected="false">ชาทราคา</button>
+          </div>
+        </div>
+      </header>
 
-      <section class="card">
+      <section id="carsView" class="cars-view" aria-labelledby="carsTitle">
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">Bidding</p>
+            <h1 id="carsTitle">รายการรถเข้ารับบริการ</h1>
+          </div>
+          <div class="page-heading-actions">
+            <button id="openFinalForm" class="button final-action" type="button">Final</button>
+            <button id="openPriceForm" class="button primary-action" type="button">บันทึกราคา</button>
+          </div>
+        </div>
+
+        <div class="list-panel">
+          <div id="carsStatus" class="list-status" role="status">กำลังโหลดรายการรถ...</div>
+          <div class="cars-table-wrap">
+            <table class="cars-table" aria-describedby="carsStatus">
+              <colgroup>
+                <col style="width: 110px" />
+                <col style="width: 140px" />
+                <col style="width: 80px" />
+                <col style="width: 95px" />
+                <col style="width: 80px" />
+                <col style="width: 110px" />
+                <col style="width: 190px" />
+                <col style="width: 65px" />
+                <col style="width: 85px" />
+                <col style="width: 70px" />
+                <col style="width: 60px" />
+                <col style="width: 100px" />
+                <col style="width: 100px" />
+                <col style="width: 100px" />
+                <col style="width: 180px" />
+                <col style="width: 65px" />
+                <col style="width: 185px" />
+                <col style="width: 70px" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>วันที่เข้ารับบริการ</th>
+                  <th>สาขา</th>
+                  <th>สถานที่</th>
+                  <th>ทะเบียน</th>
+                  <th>ยี่ห้อ</th>
+                  <th>รุ่น</th>
+                  <th>รุ่นย่อย</th>
+                  <th>ปี</th>
+                  <th>เลขไมล์</th>
+                  <th>เชื้อเพลิง</th>
+                  <th>สภาพ</th>
+                  <th>ราคาคาดหวัง</th>
+                  <th>ราคาสูงสุดDS</th>
+                  <th>ราคาสูงสุดFinal</th>
+                  <th>หมายเหตุ</th>
+                  <th>Final</th>
+                  <th>ระยะเวลาเปิดไฟนอล</th>
+                  <th>เวลาคงเหลือ</th>
+                </tr>
+              </thead>
+              <tbody id="carsTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="chartView" class="chart-view" aria-labelledby="chartTitle" hidden>
+        <div class="chart-toolbar">
+          <div>
+            <p class="eyebrow">Price Chart</p>
+            <h1 id="chartTitle">ชาทราคา</h1>
+          </div>
+          <div class="chart-date-control">
+            <label class="label" for="chartDateSelect">วันที่เข้ารับบริการ</label>
+            <select id="chartDateSelect" class="input chart-date-select"></select>
+          </div>
+        </div>
+
+        <div id="chartStatus" class="list-status" role="status">กำลังโหลดข้อมูล...</div>
+
+        <div id="chartSummary" class="chart-summary"></div>
+        <div id="chartBranches" class="chart-branches"></div>
+      </section>
+
+      <section id="priceView" class="price-view" aria-labelledby="priceTitle" hidden>
+        <div class="price-heading">
+          <button id="backToCars" class="button secondary" type="button">กลับไปรายการรถ</button>
+          <h1 id="priceTitle">บันทึกราคา</h1>
+        </div>
+
+        <section class="card">
         <div style="display: flex; justify-content: flex-end; align-items: center;">
           <input id="testMode" type="checkbox" style="transform: scale(0.8); transform-origin: top right;" aria-label="test mode" />
         </div>
@@ -91,14 +189,53 @@
           </div>
         </div>
 
+        <div id="finalNoteRow" class="row" hidden>
+          <label class="label" for="finalNote">หมายเหตุ</label>
+          <textarea id="finalNote" class="input textarea" rows="3" autocomplete="off"></textarea>
+        </div>
+
         <div class="actions">
           <button id="submit" class="button" disabled>บันทึก</button>
           <button id="reset" class="button secondary" type="button">ล้างค่า</button>
         </div>
 
         <div id="status" class="status" role="status"></div>
+        </section>
       </section>
     </main>
+
+    <div id="finalModal" class="modal" aria-hidden="true">
+      <div class="modal-backdrop" data-close="true"></div>
+      <div class="modal-dialog final-dialog" role="dialog" aria-modal="true" aria-labelledby="finalModalTitle">
+        <div class="modal-header">
+          <h2 id="finalModalTitle">ตั้งเวลา Final</h2>
+          <button id="closeFinalModal" class="icon-button" type="button" aria-label="ปิด" title="ปิด">✕</button>
+        </div>
+        <div class="modal-body">
+          <div id="finalCarSummary" class="final-car-summary"></div>
+          <div class="row">
+            <label class="label" for="finalDate">วันที่เปิดFinal</label>
+            <input id="finalDate" class="input" type="date" />
+          </div>
+          <div class="time-grid">
+            <div class="row">
+              <label class="label" for="finalStartTime">เวลาเริ่ม</label>
+              <input id="finalStartTime" class="input" type="time" step="60" />
+            </div>
+            <div class="row">
+              <label class="label" for="finalEndTime">เวลาจบ</label>
+              <input id="finalEndTime" class="input" type="time" step="60" />
+            </div>
+          </div>
+          <div class="actions">
+            <button id="saveFinalWindow" class="button final-action" type="button">บันทึก Final</button>
+            <button id="cancelFinalWindow" class="button secondary" type="button">ยกเลิก</button>
+            <button id="deleteFinalWindow" class="button danger final-delete-action" type="button">ยกเลิก Final</button>
+          </div>
+          <div id="finalModalStatus" class="status" role="status"></div>
+        </div>
+      </div>
+    </div>
 
     <div id="tentsModal" class="modal" aria-hidden="true">
       <div class="modal-backdrop" data-close="true"></div>
@@ -118,6 +255,6 @@
       </div>
     </div>
 
-    <script src="/app.js"></script>
+    <script src="/app.js?v=list-ui-1"></script>
   </body>
 </html>
