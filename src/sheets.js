@@ -460,6 +460,7 @@ function rowToBiddingCar(row) {
     condition: String(row[13] || "").trim(),
     expectedPrice: String(row[15] || "").trim(),
     dsMaxPrice: String(row[18] || "").trim(),
+    saleStatus: String(row[22] || "").trim(),
     remark: String(row[25] || "").trim(),
     purchasePrice: String(row[26] || "").trim(),
     purchaseDate: normalizeServiceDate(row[27]) || String(row[27] || "").trim(),
@@ -645,6 +646,7 @@ async function listBiddingCars({ limit = 50 } = {}) {
 }
 
 const BIDDING_UPDATE_FIELDS = {
+  saleStatus: "X",
   purchasePrice: "AB",
   purchaseDate: "AC",
   salePrice: "AE",

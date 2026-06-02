@@ -264,6 +264,35 @@ const fallbackTents = [
   "พี่พีช/84 Carcenter"
 ];
 
+const SALE_STATUS_OPTIONS = [
+  "ไม่สะดวกเพิ่มเงิน",
+  "คาดหวังเกินราคาขาย",
+  "ราคามาไม่แรง",
+  "แห่เช็คราคา",
+  "นายหน้า",
+  "รถบริษัท",
+  "ไม่พร้อมจอด",
+  "ติดต่อไม่ได้",
+  "ขายที่อื่น",
+  "รอแก้ไขสภาพ",
+  "ไม่มีอัพเดทจากสาขา",
+  "รายงานไม่ตรง",
+  "ปิดการขาย"
+];
+
+function getSaleStatusClass(value) {
+  const text = String(value || "").trim();
+  if (!text) return "status-empty";
+  if (["ไม่สะดวกเพิ่มเงิน", "คาดหวังเกินราคาขาย", "ราคามาไม่แรง"].includes(text)) return "status-pink";
+  if (["แห่เช็คราคา", "รอแก้ไขสภาพ"].includes(text)) return "status-yellow";
+  if (["นายหน้า", "รถบริษัท"].includes(text)) return "status-purple";
+  if (["ไม่พร้อมจอด", "ติดต่อไม่ได้", "ขายที่อื่น"].includes(text)) return "status-red";
+  if (text === "ไม่มีอัพเดทจากสาขา") return "status-dark";
+  if (text === "รายงานไม่ตรง") return "status-brown";
+  if (text === "ปิดการขาย") return "status-green";
+  return "status-gray";
+}
+
 const $serviceDate = document.getElementById("serviceDate");
 const $serviceDateMenu = document.getElementById("serviceDateMenu");
 const $plate = document.getElementById("plate");
@@ -669,6 +698,27 @@ function appendEditableCell(row, car, field, value, type) {
   return cell;
 }
 
+function renderStatusCellContent(cell, value) {
+  const text = String(value || "").trim();
+  cell.innerHTML = "";
+  cell.appendChild(createEl("span", {
+    className: `sale-status-pill ${getSaleStatusClass(text)}`,
+    text: text || "-"
+  }));
+  cell.dataset.rawValue = text;
+  cell.dataset.fullText = text || "-";
+}
+
+function appendSaleStatusCell(row, car) {
+  const cell = createEl("td", { className: "editable-cell sale-status-cell" });
+  cell.dataset.field = "saleStatus";
+  cell.dataset.editorType = "status";
+  cell.dataset.primaryKey = car.primaryKey || `${car.plate || ""} ${car.serviceDate || ""}`.trim();
+  renderStatusCellContent(cell, car.saleStatus);
+  row.appendChild(cell);
+  return cell;
+}
+
 function getFinalState(final) {
   if (!final || !final.startIso || !final.endIso) return "empty";
   const now = Date.now();
@@ -777,7 +827,7 @@ function renderCars(cars) {
   if (list.length === 0) {
     const row = createEl("tr");
     const cell = createEl("td", { className: "empty-state", text: "ไม่มีรายการรถ" });
-    cell.colSpan = 24;
+    cell.colSpan = 25;
     row.appendChild(cell);
     $carsTableBody.appendChild(row);
     return;
@@ -804,6 +854,7 @@ function renderCars(cars) {
     appendCell(row, car.remark);
     appendFinalCell(row, car);
     appendFinalWindowCells(row, car);
+    appendSaleStatusCell(row, car);
     appendEditableCell(row, car, "purchasePrice", car.purchasePrice, "price");
     appendEditableCell(row, car, "purchaseDate", car.purchaseDate, "date");
     appendEditableCell(row, car, "salePrice", car.salePrice, "price");
@@ -854,6 +905,7 @@ function patchCarsInPlace(cars) {
       return;
     }
     const updates = {
+      saleStatus: car.saleStatus || "-",
       purchasePrice: formatPriceValue(car.purchasePrice),
       purchaseDate: displayValue(car.purchaseDate),
       salePrice: formatPriceValue(car.salePrice),
@@ -865,7 +917,8 @@ function patchCarsInPlace(cars) {
       const cell = row.querySelector(`td[data-field="${field}"]`);
       if (!cell || cell.querySelector("input, select, textarea")) continue;
       if (cell.textContent.trim() !== text) {
-        cell.textContent = text;
+        if (field === "saleStatus") renderStatusCellContent(cell, text === "-" ? "" : text);
+        else cell.textContent = text;
         cell.dataset.fullText = text;
         cell.classList.add("cell-updated");
         setTimeout(() => cell.classList.remove("cell-updated"), 900);
@@ -946,7 +999,8 @@ async function saveEditableCell(cell, value) {
     });
     const type = cell.dataset.editorType;
     const display = type === "price" ? formatPriceValue(value) : type === "date" ? formatInputDateForDisplay(value) || "-" : displayValue(value);
-    cell.textContent = display;
+    if (type === "status") renderStatusCellContent(cell, value);
+    else cell.textContent = display;
     cell.dataset.rawValue = String(value || "").trim();
     cell.dataset.fullText = display;
   } catch (error) {
@@ -955,7 +1009,8 @@ async function saveEditableCell(cell, value) {
     setTimeout(() => {
       const type = cell.dataset.editorType;
       const raw = cell.dataset.rawValue || "";
-      cell.textContent = type === "price" ? formatPriceValue(raw) : displayValue(raw);
+      if (type === "status") renderStatusCellContent(cell, raw);
+      else cell.textContent = type === "price" ? formatPriceValue(raw) : displayValue(raw);
     }, 900);
   } finally {
     cell.classList.remove("saving");
@@ -969,7 +1024,12 @@ function startEditableCell(cell) {
   hideCellPopover();
   cell.textContent = "";
   let editor;
-  if (type === "mechanic") {
+  if (type === "status") {
+    editor = createEl("select", { className: "cell-editor" });
+    editor.appendChild(createEl("option", { value: "", text: "-" }));
+    for (const option of SALE_STATUS_OPTIONS) editor.appendChild(createEl("option", { value: option, text: option }));
+    editor.value = rawValue;
+  } else if (type === "mechanic") {
     editor = createEl("select", { className: "cell-editor" });
     editor.appendChild(createEl("option", { value: "", text: "-" }));
     editor.appendChild(createEl("option", { value: "รายงานสภาพตรงตามที่ช่างรายงาน", text: "สภาพตรงตามรายงาน" }));
@@ -999,7 +1059,8 @@ function startEditableCell(cell) {
       finish();
     }
     if (event.key === "Escape") {
-      cell.textContent = type === "price" ? formatPriceValue(rawValue) : displayValue(rawValue);
+      if (type === "status") renderStatusCellContent(cell, rawValue);
+      else cell.textContent = type === "price" ? formatPriceValue(rawValue) : displayValue(rawValue);
     }
   });
 }
