@@ -355,6 +355,7 @@ let selectedFinalCarForModal = null;
 let remainingTimer = null;
 let carsRefreshTimer = null;
 let cellPopoverTimer = null;
+let activeEditableCell = null;
 
 function createDropdown({ triggerEl, menuEl, placeholder, searchInputEl, optionsContainerEl }) {
   const container = triggerEl.closest(".dropdown");
@@ -1014,6 +1015,7 @@ async function saveEditableCell(cell, value) {
     }, 900);
   } finally {
     cell.classList.remove("saving");
+    if (activeEditableCell === cell) activeEditableCell = null;
   }
 }
 
@@ -1021,6 +1023,8 @@ function startEditableCell(cell) {
   if (!cell || cell.querySelector("input, select, textarea")) return;
   const type = cell.dataset.editorType;
   const rawValue = cell.dataset.rawValue || "";
+  let initialEditorValue = type === "date" ? parseDisplayDateToInput(rawValue) : rawValue;
+  activeEditableCell = cell;
   hideCellPopover();
   cell.textContent = "";
   let editor;
@@ -1028,39 +1032,56 @@ function startEditableCell(cell) {
     editor = createEl("select", { className: "cell-editor" });
     editor.appendChild(createEl("option", { value: "", text: "-" }));
     for (const option of SALE_STATUS_OPTIONS) editor.appendChild(createEl("option", { value: option, text: option }));
-    editor.value = rawValue;
+    editor.value = initialEditorValue;
   } else if (type === "mechanic") {
     editor = createEl("select", { className: "cell-editor" });
     editor.appendChild(createEl("option", { value: "", text: "-" }));
     editor.appendChild(createEl("option", { value: "รายงานสภาพตรงตามที่ช่างรายงาน", text: "สภาพตรงตามรายงาน" }));
     editor.appendChild(createEl("option", { value: "__custom__", text: "สภาพไม่ตรงตามที่รายงาน" }));
     editor.value = rawValue === "รายงานสภาพตรงตามที่ช่างรายงาน" ? rawValue : rawValue ? "__custom__" : "";
+    initialEditorValue = editor.value;
   } else {
     editor = createEl("input", { className: "cell-editor", type: type === "date" ? "date" : "text" });
-    editor.value = type === "date" ? parseDisplayDateToInput(rawValue) : rawValue;
+    editor.value = initialEditorValue;
     if (type === "price") editor.inputMode = "numeric";
   }
   cell.appendChild(editor);
   editor.focus();
   if (editor.select) editor.select();
 
-  const finish = async () => {
+  let finished = false;
+  const restore = () => {
+    if (type === "status") renderStatusCellContent(cell, rawValue);
+    else cell.textContent = type === "price" ? formatPriceValue(rawValue) : type === "date" ? displayValue(rawValue) : displayValue(rawValue);
+    if (activeEditableCell === cell) activeEditableCell = null;
+  };
+  const finish = async ({ force = false } = {}) => {
+    if (finished) return;
     let value = editor.value;
+    if (!force && value === initialEditorValue) {
+      finished = true;
+      restore();
+      return;
+    }
+    finished = true;
     if (type === "mechanic" && value === "__custom__") {
       value = window.prompt("กรอกรายละเอียดสภาพไม่ตรงตามที่รายงาน", rawValue && rawValue !== "รายงานสภาพตรงตามที่ช่างรายงาน" ? rawValue : "") || "";
     }
     if (type === "price") value = formatWithCommas(value);
     await saveEditableCell(cell, value);
   };
-  editor.addEventListener("change", finish, { once: true });
+  editor.addEventListener("change", () => finish({ force: true }), { once: true });
+  editor.addEventListener("blur", () => {
+    setTimeout(() => finish(), 80);
+  }, { once: true });
   editor.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
-      finish();
+      finish({ force: true });
     }
     if (event.key === "Escape") {
-      if (type === "status") renderStatusCellContent(cell, rawValue);
-      else cell.textContent = type === "price" ? formatPriceValue(rawValue) : displayValue(rawValue);
+      finished = true;
+      restore();
     }
   });
 }
@@ -1673,8 +1694,18 @@ $carsTableBody.addEventListener("click", (event) => {
 });
 document.addEventListener("click", (event) => {
   if (event.target.closest(".cars-table td")) return;
+  if (activeEditableCell) {
+    const editor = activeEditableCell.querySelector("input, select, textarea");
+    if (editor) editor.blur();
+  }
   hideCellPopover();
 });
+document.addEventListener("mousedown", (event) => {
+  if (!activeEditableCell) return;
+  if (activeEditableCell.contains(event.target)) return;
+  const editor = activeEditableCell.querySelector("input, select, textarea");
+  if (editor) editor.blur();
+}, true);
 window.addEventListener("scroll", hideCellPopover, true);
 $finalStartTime.addEventListener("change", () => {
   $finalEndTime.value = addMinutesToTime($finalDate.value, $finalStartTime.value, 30);
